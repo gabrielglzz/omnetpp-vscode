@@ -10,7 +10,7 @@ const { parse, sectionAtLine, itemAt } = require('./parser');
 const { diagnose } = require('./diagnostics');
 const options = require('./options');
 const { NedIndex, keyName } = require('./ned');
-const { Runner } = require('./run');
+const { Runner, oppRun, omnetppRoot } = require('./run');
 
 const LANG = 'omnetpp-ini';
 const SELECTOR = { language: LANG };
@@ -775,6 +775,21 @@ function activate(context) {
     if (text === undefined) index.delete(d.fileName);
     else index.set(d.fileName, text);
     refreshAll();
+  }));
+
+  // Options and their documentation come from the user's OMNeT++ installation
+  const output = vscode.window.createOutputChannel('OMNeT++');
+  sub(output);
+  const loadOptions = () => {
+    const env = omnetppRoot() ? { ...process.env, OMNET_ROOT: omnetppRoot() } : process.env;
+    options.load(oppRun(), context.globalStorageUri.fsPath, env)
+      .then((source) => output.appendLine(`Configuration options read from ${source} (${oppRun()})`))
+      .catch((e) => output.appendLine(`Cannot run ${oppRun()} (${e.message}): using the built-in option list, without documentation. Set omnetppIni.omnetppRoot to your OMNeT++ installation.`))
+      .finally(refreshAll);
+  };
+  loadOptions();
+  sub(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('omnetppIni.omnetppRoot')) loadOptions();
   }));
 
   const runner = new Runner(index, context);

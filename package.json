@@ -1,9 +1,28 @@
 {
-  "name": "omnetpp-ini",
-  "displayName": "OMNeT++ INI",
-  "description": "OMNeT++ ini files: highlighting, '#' comments, completion, hover, go to definition, diagnostics and running configs",
-  "version": "0.7.0",
+  "name": "omnetpp-vscode",
+  "displayName": "OMNeT++",
+  "description": "OMNeT++ ini files: highlighting, completion of options, NED parameters, submodules and statistics, diagnostics, and running and debugging configs",
+  "version": "0.8.0",
   "publisher": "gabrielglzz",
+  "license": "MIT",
+  "author": {
+    "name": "Gabriel Gómez López"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gabrielglzz/omnetpp-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/gabrielglzz/omnetpp-vscode/issues"
+  },
+  "keywords": [
+    "omnetpp",
+    "omnet++",
+    "ned",
+    "ini",
+    "simulation",
+    "discrete event simulation"
+  ],
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -55,22 +74,22 @@
         "omnetppIni.omnetppRoot": {
           "type": "string",
           "default": "",
-          "description": "OMNeT++ installation (OMNET_ROOT). Used to count runs with opp_run and exported to the terminals. Empty: use the OMNET_ROOT environment variable."
+          "description": "OMNeT++ installation (OMNET_ROOT). Its opp_run provides the option documentation and the run counts, and it is exported to terminals and debug sessions. Empty: the OMNET_ROOT environment variable, or opp_run in the PATH."
         },
         "omnetppIni.run.script": {
           "type": "string",
-          "default": "./run.sh",
-          "description": "Script that runs a config locally, relative to the workspace folder. Called as: <script> [-r <runs>] [-Qt] <ini> <config>."
+          "default": "",
+          "description": "Optional project script that runs a config, relative to the workspace folder, called from it as: <script> [-r <runs>] [-Qt] <ini> <config>. Empty: run the simulation executable directly from the ini file's folder."
         },
         "omnetppIni.run.extraArgs": {
           "type": "string",
           "default": "",
-          "description": "Extra options for the run script (e.g. -b to compile first)."
+          "description": "Extra arguments for the simulation (or for the run script, if set)."
         },
         "omnetppIni.cluster.script": {
           "type": "string",
-          "default": "./submit.sh",
-          "description": "Script that launches configs on the cluster, relative to the workspace folder. Called as: <script> [options] <user> <ini> <config>[,<config>...]."
+          "default": "",
+          "description": "Optional script that launches configs on a cluster, relative to the workspace folder, called from it as: <script> [options] <user> <ini> <config>[,<config>...]. The Cluster button is shown only when it is set."
         },
         "omnetppIni.cluster.user": {
           "type": "string",
@@ -80,7 +99,7 @@
         "omnetppIni.cluster.extraArgs": {
           "type": "string",
           "default": "",
-          "description": "Extra options for the cluster script (e.g. -m 8 -p <partition> --tmp)."
+          "description": "Extra options for the cluster script."
         },
         "omnetppIni.debug.debugger": {
           "type": "string",
@@ -95,12 +114,12 @@
         "omnetppIni.debug.program": {
           "type": "string",
           "default": "",
-          "description": "Debug binary, relative to the workspace folder. Empty: <workspace folder name>_dbg, as built by ./build.sh debug."
+          "description": "Debug executable, relative to the workspace folder. Empty: <workspace folder name>_dbg, as opp_makemake builds it with MODE=debug."
         },
         "omnetppIni.debug.buildCommand": {
           "type": "string",
-          "default": "./build.sh debug",
-          "description": "Command that builds the debug binary when it is missing."
+          "default": "make MODE=debug",
+          "description": "Command (run from the workspace folder) that builds the debug executable when it is missing."
         },
         "omnetppIni.debug.userInterface": {
           "type": "string",
@@ -115,6 +134,16 @@
           "type": "string",
           "default": "",
           "description": "Extra arguments for the simulation in debug sessions (e.g. --cmdenv-express-mode=false)."
+        },
+        "omnetppIni.run.program": {
+          "type": "string",
+          "default": "",
+          "description": "Simulation executable, relative to the workspace folder. Empty: the executable opp_makemake builds (named after the workspace folder) if it exists, otherwise opp_run."
+        },
+        "omnetppIni.nedPath": {
+          "type": "string",
+          "default": "",
+          "description": "NED path passed with -n (folders relative to the workspace folder, separated by ':'). Empty: the folders listed in the project's .nedfolders file, or the workspace folder."
         }
       }
     },
@@ -170,5 +199,8 @@
         }
       ]
     }
-  }
+  },
+  "extensionKind": [
+    "workspace"
+  ]
 }

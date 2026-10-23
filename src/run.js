@@ -1,6 +1,6 @@
 // Running configurations from the editor: CodeLens above each section and
-// commands that launch ./run.sh (locally) or ./submit.sh (slurm)
-// in a terminal. The runs and their iteration variables come from
+// commands that launch the simulation (or a project script) in a terminal,
+// a debug session, or a cluster script. The runs and their iteration variables come from
 // `opp_run -q runs`.
 'use strict';
 
@@ -107,13 +107,38 @@ class Runner {
     return folder ? folder.uri.fsPath : path.dirname(file);
   }
 
-  // Script path as typed in the terminal, which starts in the workspace folder.
-  script(file, key, fallback) {
-    return setting(key, fallback);
+  // Simulation executable: the omnetppIni.run.program setting, or the
+  // executable opp_makemake builds (named after the project directory, with
+  // `suffix` for debug builds), or opp_run.
+  program(root, suffix = '') {
+    const ws = this.workspaceDir(root);
+    const p = setting(suffix ? 'debug.program' : 'run.program', '');
+    if (p) return path.isAbsolute(p) ? p : path.join(ws, p);
+    const built = path.join(ws, path.basename(ws) + suffix);
+    return fs.existsSync(built) || suffix ? built : 'opp_run';
   }
 
-  execute(name, root, args) {
-    const cwd = this.workspaceDir(root);
+  // NED path for -n: the omnetppIni.nedPath setting, or the folders listed in
+  // the project's .nedfolders file (OMNeT++ project convention), or the
+  // workspace folder.
+  nedPath(root) {
+    const ws = this.workspaceDir(root);
+    const configured = setting('nedPath', '');
+    let dirs;
+    if (configured) {
+      dirs = configured.split(path.delimiter);
+    } else {
+      try {
+        dirs = fs.readFileSync(path.join(ws, '.nedfolders'), 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      } catch {
+        dirs = [];
+      }
+    }
+    if (!dirs.length) dirs = ['.'];
+    return dirs.map((d) => path.resolve(ws, d)).join(path.delimiter);
+  }
+
+  execute(name, cwd, args) {
     const env = omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined;
     const terminal = vscode.window.createTerminal({ name, cwd, env });
     terminal.show();
@@ -162,14 +187,32 @@ class Runner {
     if (!root) return;
     const runs = qtenv ? [] : await this.pickRuns(root, config);
     if (runs === undefined) return;
-    const args = [this.script(root, 'run.script', './run.sh'), ...runs];
-    if (qtenv) args.push('-Qt');
-    args.push(...splitArgs(setting('run.extraArgs', '')));
-    args.push(vscode.workspace.asRelativePath(root, false), config);
-    this.execute(`${qtenv ? 'Qtenv' : 'Run'}: ${config}`, root, args);
+    const name = `${qtenv ? 'Qtenv' : 'Run'}: ${config}`;
+    const extra = splitArgs(setting('run.extraArgs', ''));
+    const script = setting('run.script', '');
+    if (script) {
+      // Project script, run from the workspace folder: <script> [-r runs] [-Qt] <ini> <config>
+      const args = [script, ...runs, ...(qtenv ? ['-Qt'] : []), ...extra, vscode.workspace.asRelativePath(root, false), config];
+      this.execute(name, this.workspaceDir(root), args);
+    } else {
+      // The simulation itself, run from the ini file's folder. Without -r,
+      // Cmdenv runs every run, so "run 0" ([] from pickRuns) needs -r 0.
+      const r = runs.length === 0 ? ['-r', '0'] : runs[1] === 'all' ? [] : runs;
+      const args = [this.program(root), '-u', qtenv ? 'Qtenv' : 'Cmdenv', '-c', config, ...r,
+        '-n', this.nedPath(root), ...extra, path.basename(root)];
+      this.execute(name, path.dirname(root), args);
+    }
   }
 
   async runCluster(file, configs) {
+    const script = setting('cluster.script', '');
+    if (!script) {
+      const open = await vscode.window.showWarningMessage(
+        'No cluster script configured. Set omnetppIni.cluster.script to a script called as: <script> [options] <user> <ini> <config>[,<config>...]',
+        'Open Settings');
+      if (open) vscode.commands.executeCommand('workbench.action.openSettings', 'omnetppIni.cluster');
+      return;
+    }
     const root = await this.pickRoot(file);
     if (!root) return;
     const runs = await this.pickRuns(root, configs[0], true);
@@ -185,18 +228,16 @@ class Runner {
       if (!user) return;
       await vscode.workspace.getConfiguration(CONFIG).update('cluster.user', user, vscode.ConfigurationTarget.Global);
     }
-    const args = [this.script(root, 'cluster.script', './submit.sh'), ...build.args, ...runs,
+    const args = [script, ...build.args, ...runs,
       ...splitArgs(setting('cluster.extraArgs', '')), user, vscode.workspace.asRelativePath(root, false), configs.join(',')];
-    this.execute(`Cluster: ${configs.join(',')}`, root, args);
+    this.execute(`Cluster: ${configs.join(',')}`, this.workspaceDir(root), args);
   }
 
   // ------------------------------------------------------------ debugging
 
-  // Debug binary: <workspace>/<workspace dir name>_dbg (./build.sh debug).
+  // Debug executable: <workspace>/<project name>_dbg, as opp_makemake builds it with MODE=debug.
   debugProgram(root) {
-    const ws = this.workspaceDir(root);
-    const p = setting('debug.program', '') || `${path.basename(ws)}_dbg`;
-    return path.isAbsolute(p) ? p : path.join(ws, p);
+    return this.program(root, '_dbg');
   }
 
   // Debugger extension to use: 'lldb' (CodeLLDB) or 'cppdbg' (Microsoft C/C++).
@@ -215,12 +256,12 @@ class Runner {
     return undefined;
   }
 
-  // Runs `./build.sh debug` as a task and resolves to true if it succeeds.
+  // Runs the debug build command as a task and resolves to true if it succeeds.
   buildDebug(root) {
     const ws = this.workspaceDir(root);
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
     const task = new vscode.Task({ type: 'shell', task: 'build-debug' }, folder || vscode.TaskScope.Workspace,
-      'Build (debug)', 'OMNeT++', new vscode.ShellExecution(setting('debug.buildCommand', './build.sh debug'), { cwd: ws, env: omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined }));
+      'Build (debug)', 'OMNeT++', new vscode.ShellExecution(setting('debug.buildCommand', 'make MODE=debug'), { cwd: ws, env: omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined }));
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true };
     return new Promise((resolve) => {
       const done = vscode.tasks.onDidEndTaskProcess((e) => {
@@ -241,7 +282,7 @@ class Runner {
     const program = this.debugProgram(root);
     if (!fs.existsSync(program)) {
       const ok = await vscode.window.showWarningMessage(
-        `Debug binary not found: ${vscode.workspace.asRelativePath(program)}`, 'Build it (./build.sh debug)');
+        `Debug executable not found: ${vscode.workspace.asRelativePath(program)}`, `Build it (${setting('debug.buildCommand', 'make MODE=debug')})`);
       if (!ok || !(await this.buildDebug(root)) || !fs.existsSync(program)) return;
     }
     // A single run: the debugger runs one process
@@ -256,8 +297,7 @@ class Runner {
       if (!pick) return;
       run = pick.run;
     }
-    const ws = this.workspaceDir(root);
-    const args = ['-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', ws,
+    const args = ['-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', this.nedPath(root),
       '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
     const env = {};
     if (omnetppRoot()) {
@@ -294,9 +334,11 @@ class Runner {
       const lens = new vscode.CodeLens(range);
       lens.data = { file: document.fileName, config: s.name, roots };
       lenses.push(lens);
-      lenses.push(new vscode.CodeLens(range, { title: '$(debug) Debug', tooltip: 'Debug a run with the debug binary (./build.sh debug)', command: 'omnetppIni.debug', arguments: args }));
+      lenses.push(new vscode.CodeLens(range, { title: '$(debug) Debug', tooltip: 'Debug a run with the debug executable', command: 'omnetppIni.debug', arguments: args }));
       lenses.push(new vscode.CodeLens(range, { title: '$(debug-alt) Qtenv', tooltip: 'Run 0 with the Qtenv GUI', command: 'omnetppIni.runQtenv', arguments: args }));
-      lenses.push(new vscode.CodeLens(range, { title: '$(cloud-upload) Cluster', tooltip: 'Launch on the cluster with ./submit.sh', command: 'omnetppIni.runCluster', arguments: args }));
+      if (setting('cluster.script', '')) {
+        lenses.push(new vscode.CodeLens(range, { title: '$(cloud-upload) Cluster', tooltip: `Launch on the cluster with ${setting('cluster.script', '')}`, command: 'omnetppIni.runCluster', arguments: args }));
+      }
     }
     return lenses;
   }
@@ -306,7 +348,7 @@ class Runner {
     const { file, config, roots } = lens.data;
     const args = [file, config];
     let title = '$(play) Run';
-    let tooltip = 'Run with ./run.sh';
+    let tooltip = `Run with ${setting('run.script', '') || 'the simulation executable'}`;
     // For a fragment included by several ini files, use the one chosen last time
     const last = this.context.workspaceState.get(`root:${file}`);
     const root = roots.length === 1 ? roots[0] : roots.includes(last) ? last : null;
@@ -423,4 +465,4 @@ function splitArgs(s) {
   return s.trim() ? s.trim().split(/\s+/) : [];
 }
 
-module.exports = { Runner, quote };
+module.exports = { Runner, quote, oppRun, omnetppRoot };
