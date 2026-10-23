@@ -10,13 +10,18 @@ VS Code extension for OMNeT++ `.ini` files. Plain JavaScript, no build step or d
   - the statistics (`@statistic`, `@statisticTemplate`) of the module (`**.app[0].` → `endToEndDelay`, `throughput`…; templates appear with the name used in ini keys, e.g. `flow*-throughput`),
   - the per-object options; after a statistic, the recording options (`result-recording-modes`, `vector-recording`…) come first.
 
+  - the parameters of the module, with their type, unit, default value and `//` documentation. Parameters that NED sets without `default()` (in the module, a derived type, or the parent's submodule body, e.g. `host[..]: Host { numApps = 2; }`) cannot be changed from the ini: they are shown struck through, at the end.
+
+  After `typename =`, the possible types are offered (the default one first, e.g. `"DropTailQueue"` for `**.router[*].queue.typename`). After a parameter, its default value (and `true`/`false` for booleans).
+
   In `result-recording-modes` values, the modes declared in the statistic's `record=` are offered as `+mode` (optional ones, off by default) and `-mode`, followed by every result recorder of OMNeT++ (`psquare`, `timeavg`, `stats`…). Hover and `F12` on a submodule or statistic in a key show its type or declaration.
 - **Hover**: documentation of options and predefined variables, definitions of iteration variables, fallback chain of a config (per `omnetpp.ini` that loads the file), NED file of the network.
 - **Go to definition / Find references** (`F12` / `Shift+F12`) for `include` files, configs (section headings and `extends`), `${variables}` and `network`.
 - **Outline and folding** by section, with includes and iteration variables.
+- **NED diagnostics** (warnings): a parameter that NED sets without `default()` (the ini value is ignored), and a parameter that does not exist in the modules the key matches (typos, keys left over from older versions…). The latter can be disabled with the `omnetppIni.diagnostics.unknownParameters` setting.
 - **Diagnostics** reproducing the errors OMNeT++ raises when loading an ini file: `;` comments, indented lines (indentation means line continuation), invalid or duplicate section names, unknown or misplaced options (global options outside `[General]`, per-object options without `**.`), unknown per-object options, `No such config` in `extends`, cycles in the fallback chain, missing or circular includes. Undefined `${variables}` are reported as warnings.
 
-The extension indexes every `.ini` and `.ned` file in the workspace (NED files are scanned for networks, submodules, `extends`/`like` and statistics; it is not a full NED parser, and when a path cannot be resolved from the network, submodules are looked up by name). Configs and variables are resolved through the include graph: a fragment such as `fragments/traffic.ini` sees the configs of every `omnetpp.ini` that includes it. Fragments that no file includes are not checked for `extends` and variables.
+The extension indexes every `.ini` and `.ned` file in the workspace (NED files are scanned for networks, parameters, submodules, `extends`/`like` and statistics; it is not a full NED parser, and when a path cannot be resolved from the network, submodules are looked up by name). Configs and variables are resolved through the include graph: a fragment such as `fragments/traffic.ini` sees the configs of every `omnetpp.ini` that includes it. Fragments that no file includes are not checked for `extends` and variables.
 
 Option names and documentation come from `data/options.json`, generated from the OMNeT++ installation with `./gen-options.py` (`opp_run -h configdetails`, `-h configvars` and `-h resultrecorders`, currently OMNeT++ 6.4). Rerun it after upgrading OMNeT++.
 

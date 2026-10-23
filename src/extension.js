@@ -177,6 +177,56 @@ function statsNamed(name, before, file) {
   return ned.findStats(name);
 }
 
+// Parameters that can follow the key segments: Map(name => [param]). The
+// assignments in the body of the submodule matched by the last segment
+// (e.g. `host[..]: Host { numApps = 2; }`) fix those parameters.
+function paramsForPath(segs, file) {
+  const types = resolvePath(segs, file);
+  const byName = new Map();
+  const add = (p) => {
+    if (!byName.has(p.name)) byName.set(p.name, []);
+    byName.get(p.name).push(p);
+  };
+  const last = segs.length ? moduleName(segs[segs.length - 1].text) : null;
+  const decls = last ? submodulesDecls(segs.slice(0, -1), last, file) : [];
+  for (const t of types || ned.allTypeNames()) {
+    for (const p of ned.paramsOf(t)) {
+      const decl = decls.find((d) => d.types.includes(t));
+      const a = decl && decl.assigns.find((x) => x.name === p.name);
+      add(a ? { ...p, value: a.value, isDefault: a.isDefault, default: a.default, assignedIn: `${decl.parent}.${decl.name}`, fixed: !a.isDefault } : p);
+    }
+  }
+  return { byName, resolved: Boolean(types) };
+}
+
+// Declarations of the submodule `name` that can follow the key segments.
+function submodulesDecls(segs, name, file) {
+  const types = resolvePath(segs, file);
+  return types ? types.flatMap((t) => ned.children(t)).filter((c) => c.name === name) : [];
+}
+
+function paramSignature(p) {
+  let sig = `${p.volatile ? 'volatile ' : ''}${p.type} ${p.name}`;
+  if (p.unit) sig += ` @unit(${p.unit})`;
+  if (p.value !== null) sig += ` = ${p.value}`;
+  return sig;
+}
+
+function paramMarkdown(list) {
+  const p = list[0];
+  let text = '```ned\n' + [...new Set(list.map(paramSignature))].join('\n') + '\n```';
+  if (list.some((x) => x.fixed)) {
+    const where = [...new Set(list.filter((x) => x.fixed).map((x) => x.assignedIn || x.declaredIn))].join(', ');
+    text += `\n\n**Set in NED** (${where}) without \`default()\`: an ini value is ignored.`;
+  }
+  const doc = list.map((x) => x.doc).find(Boolean);
+  if (doc) text += `\n\n${doc}`;
+  const seen = new Set();
+  text += '\n\nDeclared in: ' + list.filter((x) => !seen.has(x.declaredIn) && seen.add(x.declaredIn))
+    .map((x) => `\`${x.declaredIn}\` (${link(x.file, x.line)})`).join(', ');
+  return text;
+}
+
 function typeLinks(types) {
   return types.map((t) => {
     const ty = ned.type(t);
@@ -220,11 +270,44 @@ function statMarkdown(list) {
 
 // ---------------------------------------------------------------- diagnostics
 
+// Diagnostics that need the NED files: parameters that do not exist in the
+// modules a key matches, or that NED sets without default() (so the ini value
+// is ignored). Only for keys whose module path resolves from the network.
+// Parameters of OMNeT++'s built-in NED types (channels, ned.IdealChannel...),
+// which are not in the workspace NED files.
+const BUILTIN_PARAMS = new Set(['delay', 'datarate', 'ber', 'per', 'disabled']);
+
+function nedDiagnostics(file, doc, checkUnknown = true) {
+  const out = [];
+  for (const e of doc.entries) {
+    if (!e.key.includes('.')) continue;
+    const segs = keySegments(e.key);
+    const last = segs[segs.length - 1];
+    if (!/^[A-Za-z_]\w*$/.test(last.text) || last.text === 'typename' || options.lookup(last.text)) continue;
+    const before = segs.slice(0, -1);
+    const { byName, resolved } = paramsForPath(before, file);
+    if (!resolved) continue;
+    const pos = { line: e.line, start: e.keyStart + last.start, end: e.keyStart + last.start + last.text.length };
+    const list = byName.get(last.text);
+    if (!list) {
+      if (checkUnknown && !BUILTIN_PARAMS.has(last.text) && !statsForPath(before, file).byName.has(last.text)) {
+        out.push({ ...pos, severity: 'warning', message: `No parameter '${last.text}' in the modules matched by '${before.map((g) => g.text).join('.')}'` });
+      }
+    } else if (list.every((p) => p.fixed)) {
+      const where = [...new Set(list.map((p) => p.assignedIn || p.declaredIn))].join(', ');
+      out.push({ ...pos, severity: 'warning', message: `Parameter '${last.text}' is set in NED (${where}) without default(): this value is ignored` });
+    }
+  }
+  return out;
+}
+
 const collection = vscode.languages.createDiagnosticCollection(LANG);
 
 function refreshDiagnostics(document) {
   if (document.languageId !== LANG || document.uri.scheme !== 'file') return;
-  const list = diagnose(document.fileName, index).map((d) => {
+  const doc = docOf(document);
+  const list = [...diagnose(document.fileName, index), ...nedDiagnostics(document.fileName, doc,
+    vscode.workspace.getConfiguration('omnetppIni').get('diagnostics.unknownParameters', true))].map((d) => {
     const diag = new vscode.Diagnostic(
       new vscode.Range(d.line, d.start, d.line, d.end), d.message,
       d.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
@@ -328,12 +411,22 @@ function complete(document, position) {
           i.command = { command: 'editor.action.triggerSuggest', title: '' };
           items.push(i);
         }
+        const params = paramsForPath(before, file);
+        for (const [name, list] of params.byName) {
+          const fixed = list.every((x) => x.fixed);
+          const i = item(name, vscode.CompletionItemKind.Field, paramSignature(list[0]), paramMarkdown(list));
+          i.range = range;
+          i.sortText = (fixed ? '5' : params.resolved ? '1' : '4') + name;
+          if (fixed) i.tags = [vscode.CompletionItemTag.Deprecated];
+          i.insertText = `${name} = `;
+          items.push(i);
+        }
         const { byName, resolved } = statsForPath(before, file);
         for (const [k, list] of byName) {
           const types = [...new Set(list.map((s) => s.type))].join(', ');
           const i = item(k, vscode.CompletionItemKind.Event, `statistic of ${types}`, statMarkdown(list));
           i.range = range;
-          i.sortText = (resolved ? '1' : '4') + k;
+          i.sortText = (resolved ? '2' : '4') + k;
           i.insertText = `${k}.`;
           i.command = { command: 'editor.action.triggerSuggest', title: '' };
           items.push(i);
@@ -343,7 +436,7 @@ function complete(document, position) {
       for (const o of options.options.filter((x) => x.scope === 'per-object')) {
         const i = item(o.name.replace('%', '0'), vscode.CompletionItemKind.Property, `<${o.type}> per-object option`, options.optionMarkdown(o));
         i.range = range;
-        i.sortText = (afterStat && forStats.test(o.kind) ? '0' : '2') + o.name;
+        i.sortText = (afterStat && forStats.test(o.kind) ? '0' : '3') + o.name;
         i.insertText = new vscode.SnippetString(`${o.name.replace('%', '${1:0}')} = `);
         items.push(i);
       }
@@ -386,6 +479,36 @@ function complete(document, position) {
     });
   }
   const o = optionOfKey(key);
+  const segs = keySegments(key);
+  if (o && o.name === 'typename' && segs.length > 1) {
+    const before = segs.slice(0, -1);
+    const last = moduleName(before[before.length - 1].text);
+    const decls = last ? submodulesDecls(before.slice(0, -1), last, file) : [];
+    const types = decls.length ? [...new Set(decls.flatMap((d) => d.types))] : resolvePath(before, file) || [];
+    const r = wordRange(position, prefix, /"?[\w.]*"?$/);
+    return types.map((t) => {
+      const ty = ned.type(t);
+      const def = decls.some((d) => d.types[0] === t);
+      const i = item(`"${t}"`, vscode.CompletionItemKind.Class, ty ? ty.qualified : undefined, ty ? `${ty.kind} **${t}** — ${link(ty.file, ty.line)}` : undefined);
+      i.range = r;
+      i.sortText = (def ? '0' : '1') + t;
+      return i;
+    });
+  }
+  if (!o && segs.length > 1) {
+    const { byName } = paramsForPath(segs.slice(0, -1), file);
+    const list = byName.get(segs[segs.length - 1].text);
+    if (list) {
+      const items = [];
+      if (list.some((p) => p.type === 'bool')) items.push('true', 'false');
+      for (const p of list) if (p.isDefault && p.default && !items.includes(p.default)) items.push(p.default);
+      return items.map((v) => {
+        const i = item(v, vscode.CompletionItemKind.Value, list.some((p) => p.default === v) ? 'default value' : undefined);
+        i.range = range;
+        return i;
+      });
+    }
+  }
   if (o && o.type === 'bool') {
     return ['true', 'false'].map((v) => {
       const i = item(v, vscode.CompletionItemKind.Value);
@@ -395,7 +518,6 @@ function complete(document, position) {
   }
   if (o && o.name === 'result-recording-modes') {
     const r = wordRange(position, prefix, /[+-]?\w*$/);
-    const segs = keySegments(key);
     const stats = segs.length > 1 ? statsNamed(segs[segs.length - 2].text, segs.slice(0, -2), file) : [];
     const items = [];
     const seen = new Set();
@@ -475,6 +597,9 @@ function hover(document, position) {
         text = `Submodule **${name}${sub.vector ? '[]' : ''}**: ${typeLinks([...sub.types])}`;
       } else if (stats.length) {
         text = statMarkdown(stats);
+      } else if (idx === segs.length - 1) {
+        const list = paramsForPath(segs.slice(0, -1), file).byName.get(seg.text);
+        if (list) text = paramMarkdown(list);
       }
       if (text && !o) return new vscode.Hover(md(text), range);
       break;
@@ -539,7 +664,11 @@ function definition(document, position) {
       const name = moduleName(at.seg.text);
       const sub = name && submodulesForPath(at.segs.slice(0, at.idx), file).byName.get(name);
       if (sub) return [...sub.types].map((t) => ned.type(t)).filter(Boolean).map((t) => locationOf(t.file, t));
-      return statsNamed(at.seg.text, at.segs.slice(0, at.idx), file).map((st) => locationOf(ned.type(st.type).file, st));
+      const stats = statsNamed(at.seg.text, at.segs.slice(0, at.idx), file);
+      if (stats.length) return stats.map((st) => locationOf(ned.type(st.type).file, st));
+      const list = paramsForPath(at.segs.slice(0, at.idx), file).byName.get(at.seg.text) || [];
+      const seen = new Set();
+      return list.filter((p) => !seen.has(`${p.file}:${p.line}`) && seen.add(`${p.file}:${p.line}`)).map((p) => locationOf(p.file, p));
     }
   }
   return undefined;
@@ -664,6 +793,10 @@ function activate(context) {
   nedWatcher.onDidDelete((u) => indexNed(u.fsPath));
   sub(nedWatcher);
 
+  sub(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('omnetppIni')) refreshAll();
+  }));
+
   sub(vscode.languages.registerCompletionItemProvider(SELECTOR, { provideCompletionItems: complete },
     '.', '{', '/', '=', ',', ' '));
   sub(vscode.languages.registerHoverProvider(SELECTOR, { provideHover: hover }));
@@ -677,4 +810,4 @@ function activate(context) {
 
 function deactivate() {}
 
-module.exports = { activate, deactivate };
+module.exports = { activate, deactivate, nedDiagnostics, docOf: (f) => index.get(f).doc };

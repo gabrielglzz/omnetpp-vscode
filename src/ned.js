@@ -5,7 +5,7 @@
 
 const TYPE_RE = /\b(simple|module|network|channel|moduleinterface|channelinterface)\s+([A-Za-z_]\w*)((?:\s+(?:extends|like)\s+[\w.]+(?:\s*,\s*[\w.]+)*)*)\s*\{/g;
 const PROPERTY_RE = /@(statistic|statisticTemplate|signal)\s*\[\s*([^\]]+?)\s*\]\s*\(/g;
-const SUBMODULE_RE = /(?:^|[;}\s])([A-Za-z_]\w*)\s*(\[[^\]]*\])?\s*:\s*(?:<([^>]*)>\s*like\s+([\w.]+)|([\w.]+))\s*[{;]/g;
+const SUBMODULE_RE = /(?:^|[;}\s])([A-Za-z_]\w*)\s*(\[[^\]]*\])?\s*:\s*(?:<([^>]*)>\s*like\s+([\w.]+)|([\w.]+))(?:\s+if\s+[^{;]*)?\s*[{;]/g;
 
 // Replaces comments with spaces, keeping offsets (and string contents) intact.
 function stripComments(text) {
@@ -72,6 +72,77 @@ function propertyKeys(body) {
   return keys;
 }
 
+// Splits text at top-level semicolons (outside strings and parentheses):
+// [{text, offset}].
+function statements(text, base) {
+  const out = [];
+  let depth = 0;
+  let inString = false;
+  let start = 0;
+  for (let i = 0; i <= text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if ((ch === ';' && depth === 0) || i === text.length) {
+      out.push({ text: text.slice(start, i), offset: base + start });
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+const PARAM_TYPES = 'double|int|bool|string|xml|object';
+const PROPS = '((?:@\\w+(?:\\([^)]*\\))?\\s*)*)';
+const DECL_RE = new RegExp(`^(\\s*(?:volatile\\s+)?(${PARAM_TYPES})\\s+)([A-Za-z_]\\w*)\\s*${PROPS}(?:=\\s*([\\s\\S]*?))?\\s*$`);
+const ASSIGN_RE = new RegExp(`^(\\s*)([A-Za-z_]\\w*)\\s*${PROPS}=\\s*([\\s\\S]*?)\\s*$`);
+
+// Value of a parameter assignment: {value, isDefault, default}.
+function valueInfo(raw) {
+  if (raw === undefined || raw === '') return { value: null, isDefault: false, default: null };
+  const value = raw.replace(/\s+/g, ' ').trim();
+  const m = /^default\s*\(/.exec(value);
+  if (!m) return { value, isDefault: false, default: null };
+  const close = matching(value, m[0].length - 1, '(', ')');
+  return { value, isDefault: true, default: value.slice(m[0].length, close < 0 ? value.length : close).trim() };
+}
+
+// Parameter declarations and assignments in a `parameters:` area.
+function parseParams(clean, from, to, posOf, docOf) {
+  const decls = [];
+  const assigns = [];
+  for (const st of statements(clean.slice(from, to), from)) {
+    let text = st.text;
+    let offset = st.offset;
+    const kw = /^\s*parameters\s*:/.exec(text);
+    if (kw) { text = text.slice(kw[0].length); offset += kw[0].length; }
+    if (/^\s*$/.test(text) || /^\s*@/.test(text)) continue;
+    let m;
+    if ((m = DECL_RE.exec(text))) {
+      const p = posOf(offset + m[1].length);
+      const unit = /@unit\s*\(\s*([^)]*?)\s*\)/.exec(m[4] || '');
+      decls.push({
+        name: m[3], type: m[2], unit: unit ? unit[1] : null, volatile: /volatile/.test(m[1]),
+        line: p.line, start: p.character, end: p.character + m[3].length, doc: docOf(p.line),
+        ...valueInfo(m[5]),
+      });
+    } else if ((m = ASSIGN_RE.exec(text))) {
+      const p = posOf(offset + m[1].length);
+      assigns.push({ name: m[2], line: p.line, start: p.character, end: p.character + m[2].length, ...valueInfo(m[4]) });
+    }
+  }
+  return { decls, assigns };
+}
+
+// End of the parameters area of a body: the first section keyword.
+function paramsEnd(body) {
+  const m = /\b(gates|types|submodules|connections)\b[^:;{}]*:/.exec(body);
+  return m ? m.index : body.length;
+}
+
 function parseNed(text) {
   const clean = stripComments(text);
   const lineStarts = [0];
@@ -84,6 +155,18 @@ function parseNed(text) {
       if (lineStarts[mid] <= offset) lo = mid; else hi = mid - 1;
     }
     return { line: lo, character: offset - lineStarts[lo] };
+  };
+
+  // Documentation of a declaration: its trailing // comment, or the comment
+  // lines right above it.
+  const rawLines = text.split(/\r?\n/);
+  const docOf = (line) => {
+    const raw = rawLines[line] || '';
+    const trailing = raw.indexOf('//');
+    if (trailing >= 0 && raw.slice(0, trailing).trim()) return raw.slice(trailing + 2).trim();
+    const above = [];
+    for (let l = line - 1; l >= 0 && /^\s*\/\//.test(rawLines[l]); l--) above.unshift(rawLines[l].replace(/^\s*\/\/+\s?/, ''));
+    return above.join('\n').trim();
   };
 
   const pkg = /^\s*package\s+([\w.]+)\s*;/m.exec(clean);
@@ -112,6 +195,8 @@ function parseNed(text) {
       stats: [],
       signals: [],
       submodules: [],
+      params: [],
+      assigns: [],
     });
   }
 
@@ -142,6 +227,13 @@ function parseNed(text) {
     }
   }
 
+  for (const t of types) {
+    const body = clean.slice(t.bodyStart, t.bodyEnd);
+    const { decls, assigns } = parseParams(clean, t.bodyStart, t.bodyStart + paramsEnd(body), posOf, docOf);
+    t.params = decls;
+    t.assigns = assigns;
+  }
+
   // Submodules: only in the `submodules:` section of each type (up to `connections:`)
   for (const t of types) {
     const body = clean.slice(t.bodyStart, t.bodyEnd);
@@ -150,6 +242,7 @@ function parseNed(text) {
     const from = sm.index + sm[0].length;
     const conn = /\bconnections\b[^:]*:/.exec(body.slice(from));
     const section = body.slice(from, conn ? from + conn.index : body.length);
+    const sectionStart = t.bodyStart + from;
     // Skip the bodies of the submodules themselves
     let flat = '';
     let depth = 0;
@@ -160,7 +253,16 @@ function parseNed(text) {
     while ((m = SUBMODULE_RE.exec(flat))) {
       const [, name, vector, typename, iface, type] = m;
       const def = typename && /default\s*\(\s*"([\w.]+)"\s*\)/.exec(typename);
+      // Parameters assigned in the submodule's body
+      let assigns = [];
+      if (m[0].endsWith('{')) {
+        const open = m.index + m[0].length - 1;
+        const close = matching(section, open, '{', '}');
+        const sub = section.slice(open + 1, close < 0 ? section.length : close);
+        assigns = parseParams(clean, sectionStart + open + 1, sectionStart + open + 1 + paramsEnd(sub), posOf, docOf).assigns;
+      }
       t.submodules.push({
+        assigns,
         name,
         vector: Boolean(vector),
         type: type ? type.split('.').pop() : null,
@@ -242,6 +344,24 @@ class NedIndex {
     return [...set];
   }
 
+  // Parameters of a type, including inherited ones; assignments in derived
+  // types override the value. Each parameter: the declaration plus
+  // {declaredIn, file, assignedIn, fixed}.
+  paramsOf(typeName, seen = new Set()) {
+    if (seen.has(typeName)) return [];
+    seen.add(typeName);
+    const t = this.type(typeName);
+    if (!t) return [];
+    const byName = new Map();
+    if (t.extends) for (const p of this.paramsOf(t.extends, seen)) byName.set(p.name, p);
+    for (const d of t.params) byName.set(d.name, { ...d, declaredIn: t.name, file: t.file, assignedIn: null });
+    for (const a of t.assigns) {
+      const p = byName.get(a.name);
+      if (p) byName.set(a.name, { ...p, value: a.value, isDefault: a.isDefault, default: a.default, assignedIn: t.name });
+    }
+    return [...byName.values()].map((p) => ({ ...p, fixed: p.value !== null && !p.isDefault }));
+  }
+
   // Submodules of a type, including the ones inherited through `extends`:
   // [{name, vector, types}].
   children(typeName, seen = new Set()) {
@@ -249,7 +369,7 @@ class NedIndex {
     seen.add(typeName);
     const t = this.type(typeName);
     if (!t) return [];
-    const own = t.submodules.map((s) => ({ name: s.name, vector: s.vector, types: this.typesOfSubmodule(s) }));
+    const own = t.submodules.map((s) => ({ name: s.name, vector: s.vector, types: this.typesOfSubmodule(s), assigns: s.assigns, parent: t.name }));
     const inherited = t.extends ? this.children(t.extends, seen).filter((c) => !own.some((o) => o.name === c.name)) : [];
     return [...own, ...inherited];
   }
@@ -304,6 +424,10 @@ class NedIndex {
   // Types a submodule with this name may have, anywhere in the workspace.
   submoduleTypes(name) {
     return [...(this.build().submodules.get(name) || [])];
+  }
+
+  allTypeNames() {
+    return [...this.build().types.keys()];
   }
 
   allStats() {
