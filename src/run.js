@@ -1,6 +1,7 @@
 // Running configurations from the editor: CodeLens above each section and
 // commands that launch ./run.sh (locally) or ./submit.sh (slurm)
-// in a terminal. The number of runs comes from `opp_run -q numruns`.
+// in a terminal. The runs and their iteration variables come from
+// `opp_run -q runs`.
 'use strict';
 
 const path = require('path');
@@ -32,7 +33,7 @@ class Runner {
   constructor(index, context) {
     this.index = index;
     this.context = context;
-    this.numruns = new Map(); // `${root}|${config}` => Promise<{runs} | {error}>
+    this.numruns = new Map(); // `${root}|${config}` => Promise<{runs, labels} | {error}>
     this.lensEmitter = new vscode.EventEmitter();
   }
 
@@ -44,21 +45,22 @@ class Runner {
 
   // ------------------------------------------------------------ queries
 
-  // Number of runs of a config, as OMNeT++ computes it.
+  // Runs of a config, as OMNeT++ computes them: {runs, names, labels}, where
+  // names are the iteration variables that differ between runs and labels[i]
+  // their values in run i (e.g. `load=50`), or {error}.
   countRuns(root, config) {
     const key = `${root}|${config}`;
     if (!this.numruns.has(key)) {
       this.numruns.set(key, new Promise((resolve) => {
-        execFile(oppRun(), ['-s', '-c', config, '-q', 'numruns', path.basename(root)],
-          { cwd: path.dirname(root), timeout: 20000, env: this.env() }, (err, stdout, stderr) => {
+        execFile(oppRun(), ['-s', '-c', config, '-q', 'runs', path.basename(root)],
+          { cwd: path.dirname(root), timeout: 20000, maxBuffer: 64 * 1024 * 1024, env: this.env() }, (err, stdout, stderr) => {
             const out = `${stdout}\n${stderr}`;
             const error = /Error:\s*(.*)/.exec(out);
-            const lines = stdout.trim().split(/\r?\n/);
-            const n = parseInt(lines[lines.length - 1], 10);
+            const runs = parseRuns(stdout);
             if (error) resolve({ error: error[1].trim() });
             else if (err && err.code === 'ENOENT') resolve({ error: `${oppRun()} not found: set omnetppIni.omnetppRoot` });
-            else if (Number.isNaN(n)) resolve({ error: (err && err.message) || 'cannot get the number of runs' });
-            else resolve({ runs: n });
+            else if (!runs.length) resolve({ error: (err && err.message) || 'cannot get the runs' });
+            else resolve({ runs: runs.length, ...varying(runs) });
           });
       }));
     }
@@ -135,11 +137,13 @@ class Runner {
       items.push({ label: '$(edit) Other…', description: '--array=<runs> or -r <runs>', custom: true });
     } else {
       if (n > 1 || n === undefined) items.push({ label: `$(run-all) All ${n || ''} runs`.replace('  ', ' '), description: '-r all', args: ['-r', 'all'] });
-      for (let i = 0; i < Math.min(n || 0, 20); i++) items.push({ label: `Run ${i}`, args: ['-r', String(i)] });
+      for (let i = 0; i < (n || 0); i++) items.push({ label: `Run ${i}`, description: res.labels[i], args: ['-r', String(i)] });
       if (!n) items.push({ label: 'Run 0', args: [] });
       items.push({ label: '$(edit) Range…', description: 'e.g. 3 or 0-9', custom: true });
     }
-    const pick = await vscode.window.showQuickPick(items, { title: `${config}${n ? ` (${n} runs)` : ''}`, placeHolder: 'Runs to execute' });
+    const pick = await vscode.window.showQuickPick(items, {
+      title: `${config}${n ? ` (${n} runs)` : ''}`, placeHolder: 'Runs to execute (type e.g. load=50 to filter)', matchOnDescription: true,
+    });
     if (!pick) return undefined;
     if (!pick.custom) return pick.args;
     const value = await vscode.window.showInputBox({
@@ -245,8 +249,10 @@ class Runner {
     let run = '0';
     if (res.runs > 1) {
       const items = [];
-      for (let i = 0; i < Math.min(res.runs, 50); i++) items.push({ label: `Run ${i}`, run: String(i) });
-      const pick = await vscode.window.showQuickPick(items, { title: `Debug ${config} (${res.runs} runs)`, placeHolder: 'Run to debug' });
+      for (let i = 0; i < res.runs; i++) items.push({ label: `Run ${i}`, description: res.labels[i], run: String(i) });
+      const pick = await vscode.window.showQuickPick(items, {
+        title: `Debug ${config} (${res.runs} runs)`, placeHolder: 'Run to debug (type e.g. load=50 to filter)', matchOnDescription: true,
+      });
       if (!pick) return;
       run = pick.run;
     }
@@ -311,6 +317,7 @@ class Runner {
         tooltip = res.error;
       } else {
         title += ` (${res.runs} run${res.runs === 1 ? '' : 's'})`;
+        if (res.names.length) tooltip += ` — varies ${res.names.join(', ')}`;
       }
       if (roots.length > 1) tooltip += ` with ${vscode.workspace.asRelativePath(root)} (one of the ${roots.length} ini files that include this one)`;
     } else if (roots.length > 1) {
@@ -386,6 +393,30 @@ class Runner {
       if (e.affectsConfiguration(CONFIG)) this.invalidate();
     }));
   }
+}
+
+// Parses `opp_run -q runs`: one {name: value} object per run.
+function parseRuns(stdout) {
+  const runs = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = /^Run (\d+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const vars = {};
+    // `$a=1, $b=f(1, 2), $c=3`: split only before the next `$name=`
+    for (const part of m[2].split(/,\s*(?=\$\w+=)/)) {
+      const v = /^\$(\w+)=(.*)$/.exec(part.trim());
+      if (v) vars[v[1]] = v[2];
+    }
+    runs[parseInt(m[1], 10)] = vars;
+  }
+  return runs.filter(Boolean);
+}
+
+// Iteration variables whose value changes between runs: {names, labels},
+// labels[i] being `name=value, ...` for run i.
+function varying(runs) {
+  const names = Object.keys(runs[0] || {}).filter((n) => runs.some((r) => r[n] !== runs[0][n]));
+  return { names, labels: runs.map((r) => names.map((n) => `${n}=${r[n]}`).join(', ')) };
 }
 
 function splitArgs(s) {
