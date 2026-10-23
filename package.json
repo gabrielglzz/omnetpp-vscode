@@ -1,14 +1,19 @@
 {
   "name": "omnetpp-ini",
   "displayName": "OMNeT++ INI",
-  "description": "Syntax highlighting and '#' comments for OMNeT++ ini files",
-  "version": "0.1.0",
+  "description": "OMNeT++ ini files: highlighting, '#' comments, completion, hover, go to definition and diagnostics",
+  "version": "0.2.0",
   "publisher": "gabrielglzz",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:omnetpp-ini"
   ],
   "contributes": {
     "languages": [

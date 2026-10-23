@@ -28,7 +28,7 @@
       }
     },
     "section": {
-      "match": "^\\s*(\\[)\\s*(?:(General)|(Config)\\s+([^\\]\\s]+)|([^\\]]*?))\\s*(\\])",
+      "match": "^\\s*(\\[)\\s*(?:(General)|(?:(Config)\\s+)?([A-Za-z_][\\w@-]*)|([^\\]]*?))\\s*(\\])",
       "name": "meta.section.omnetpp-ini",
       "captures": {
         "1": { "name": "punctuation.definition.section.begin.omnetpp-ini" },
