@@ -1,69 +1,116 @@
-# OMNeT++ INI support for VS Code
+# OMNeT++ for VS Code
 
-VS Code extension for OMNeT++ `.ini` files. Plain JavaScript, no build step or dependencies.
+Support for [OMNeT++](https://omnetpp.org) `.ini` files in Visual Studio Code: highlighting, completion driven by your NED files, the same errors OMNeT++ would report when loading the file, and buttons to run and debug each configuration. Plain JavaScript, no dependencies.
 
-- **Comments use `#`** (`Cmd+/` / `Ctrl+/`). VS Code's built-in `ini` language comments with `;`, which makes OMNeT++ 6 abort with *"Use hash mark instead of semicolon to start comments"*.
-- **Syntax highlighting** for `[General]`/`[Config X]` sections, `include`, `extends` (config names), `network`, global and per-object options (`sim-time-limit`, `**.typename`, `**.result-recording-modes`…), key patterns (`**`, `*`, `[*]`, `[0..3]`), iteration variables (`${load=10..100 step 10}`, `${a}`, `${x=1,2 ! y}`, predefined `${configname}`…), numbers with units (`5s`, `1e-6s`, `8KiB`), strings, functions and `\` line continuations.
-- **Completion**: configuration options (global ones only in `[General]`), per-object options after a `.`, `${` variables, config names after `extends =`, NED networks after `network =`, file paths after `include`, `true`/`false` for boolean options, recording modes.
-- **Submodules and statistics** from the NED files. After a `.` in a key, the extension resolves the module path from the network of the ini file (`network =`, also for fragments, through the files that include them): `**` matches any depth, `SW[*]` the submodules called `SW` of the current modules, and submodules declared with `like` match every implementation of the interface (and the types derived from them), since `typename` can select any of them. It then offers, in this order:
-  - the submodules (`**.net[*].` → `router[*]`; `**.router[*].` → `ppp[*]`, `queue`, `routing`),
-  - the statistics (`@statistic`, `@statisticTemplate`) of the module (`**.app[0].` → `endToEndDelay`, `throughput`…; templates appear with the name used in ini keys, e.g. `flow*-throughput`),
-  - the per-object options; after a statistic, the recording options (`result-recording-modes`, `vector-recording`…) come first.
+## Features
 
-  - the parameters of the module, with their type, unit, default value and `//` documentation. Parameters that NED sets without `default()` (in the module, a derived type, or the parent's submodule body, e.g. `host[..]: Host { numApps = 2; }`) cannot be changed from the ini: they are shown struck through, at the end.
+### Editing
+- **`#` comments** with `Ctrl+/` / `Cmd+/`. VS Code's built-in `ini` language comments with `;`, which makes OMNeT++ 6 abort with *"Use hash mark instead of semicolon to start comments"*.
+- **Syntax highlighting**: `[General]` / `[Config X]` sections, `include`, `extends`, global and per-object options, key patterns (`**`, `*`, `[*]`, `[0..3]`), iteration variables (`${load=10..100 step 10}`, `${x=1,2 ! y}`, `${configname}`…), numbers with units, strings, functions and `\` line continuations.
+- **Outline and folding** by section.
 
-  After `typename =`, the possible types are offered (the default one first, e.g. `"DropTailQueue"` for `**.router[*].queue.typename`). After a parameter, its default value (and `true`/`false` for booleans).
+### Completion
+- **Configuration options** (global ones only in `[General]`) with their documentation.
+- **Module paths from your NED files.** After a `.` in a key, the path is resolved from the `network` of the ini file: `**` matches any depth, `host[*]` the submodules called `host` of the current modules, and submodules declared with `like` match every implementation of the interface (any of them can be chosen with `typename`). It offers:
+  1. the **submodules** of the module,
+  2. its **parameters**, with type, unit, default value and `//` documentation. Parameters that NED assigns without `default()` cannot be changed from the ini, so they are shown struck through,
+  3. its **statistics** (`@statistic`, `@statisticTemplate`) and then the recording options (`result-recording-modes`, `vector-recording`…),
+  4. the per-object options.
+- **Values**: the possible types after `typename =` (the default one first), a parameter's default value, `true`/`false`, the recording modes of a statistic (`+histogram` for the optional ones, `-mean`…) and every result recorder of your OMNeT++ (`psquare`, `timeavg`…).
+- `${` variables, configs after `extends =`, networks after `network =`, file paths after `include`.
 
-  In `result-recording-modes` values, the modes declared in the statistic's `record=` are offered as `+mode` (optional ones, off by default) and `-mode`, followed by every result recorder of OMNeT++ (`psquare`, `timeavg`, `stats`…). Hover and `F12` on a submodule or statistic in a key show its type or declaration.
-- **Hover**: documentation of options and predefined variables, definitions of iteration variables, fallback chain of a config (per `omnetpp.ini` that loads the file), NED file of the network.
-- **Go to definition / Find references** (`F12` / `Shift+F12`) for `include` files, configs (section headings and `extends`), `${variables}` and `network`.
-- **Running configs**: above each `[General]` / `[Config X]` (except abstract ones) there are three CodeLens buttons:
-  - `▶ Run (N runs)` runs it with `./run.sh` in a terminal; with several runs it asks which ones (all, one, or a range), showing next to each run the iteration variables that change between runs (e.g. `Run 4  load=50`; type `load=50` to filter). The runs come from `opp_run -q runs` (computed for the visible sections, refreshed on save); if OMNeT++ rejects the config, the button shows a warning with the error.
-  - `Debug` starts a debug session of one run (it asks which one, with the same variables) with the debug binary (`<repo>_dbg`, offering to build it with `./build.sh debug` if it is missing), the same arguments as `./run.sh` and `--debug-on-errors=true`, so the debugger stops where an OMNeT++ runtime error is raised. It needs the CodeLLDB (recommended on macOS) or Microsoft C/C++ extension; the extension offers to install CodeLLDB.
-  - `Qtenv` runs run 0 with the Qtenv GUI (`./run.sh -Qt`).
-  - `Cluster` launches it with `./submit.sh`: asks for `--array=0-<N-1>` (one job per run), `-r all` (one job) or other runs, whether to compile first (`-b`), and the cluster username the first time.
+### Navigation
+- **Hover** and **Go to Definition** (`F12`) for options, parameters, statistics, submodules, networks, `include` files, configs (with their fallback chain) and `${variables}`.
+- **Find References** (`Shift+F12`) for configs and variables.
 
-  In a fragment included by several ini files (e.g. `fragments/traffic.ini`), it asks which `omnetpp.ini` to run it with and remembers the choice. The commands *OMNeT++: Run Configuration…* and *OMNeT++: Run Configurations on Cluster…* (several configs at once, `cfg1,cfg2`) are also in the command palette, and *Run* in the editor title bar. Settings: `omnetppIni.omnetppRoot` (if `OMNET_ROOT` is not in VS Code's environment), `omnetppIni.run.script` / `run.extraArgs`, `omnetppIni.cluster.script` / `cluster.user` / `cluster.extraArgs`, `omnetppIni.debug.*` (debugger, program, user interface, extra arguments), `omnetppIni.codeLens.enable`.
-- **Outline and folding** by section, with includes and iteration variables.
-- **NED diagnostics** (warnings): a parameter that NED sets without `default()` (the ini value is ignored), and a parameter that does not exist in the modules the key matches (typos, keys left over from older versions…), unless its value defines an iteration variable (`**.rt = ${rt="FA"}`, a common idiom to name runs). The latter can be disabled with the `omnetppIni.diagnostics.unknownParameters` setting.
-- **Diagnostics** reproducing the errors OMNeT++ raises when loading an ini file: `;` comments, indented lines (indentation means line continuation), invalid or duplicate section names, unknown or misplaced options (global options outside `[General]`, per-object options without `**.`), unknown per-object options, `No such config` in `extends`, cycles in the fallback chain, missing or circular includes. Undefined `${variables}` are reported as warnings.
+### Diagnostics
+- **Errors** for the checks OMNeT++ makes when it loads an ini file: `;` comments, indented lines (indentation means line continuation), invalid or duplicate sections, unknown or misplaced options, `No such config` in `extends`, cycles in the fallback chain, missing or circular includes.
+- **Warnings** for keys that silently do nothing: parameters that NED sets without `default()`, and keys that match no parameter of the modules they address (typos, leftovers…). Keys that just define an iteration variable (`**.label = ${label="A"}`) are not reported. The second check can be disabled with `omnetppIni.diagnostics.unknownParameters`.
+- Undefined `${variables}`.
 
-The extension indexes every `.ini` and `.ned` file in the workspace (NED files are scanned for networks, parameters, submodules, `extends`/`like` and statistics; it is not a full NED parser, and when a path cannot be resolved from the network, submodules are looked up by name). Configs and variables are resolved through the include graph: a fragment such as `fragments/traffic.ini` sees the configs of every `omnetpp.ini` that includes it. Fragments that no file includes are not checked for `extends` and variables.
+Ini fragments included from several files are analysed through the files that include them: a fragment sees the configs, variables and network of every `omnetpp.ini` that includes it.
 
-Option names and documentation come from `data/options.json`, generated from the OMNeT++ installation with `./gen-options.py` (`opp_run -h configdetails`, `-h configvars` and `-h resultrecorders`, currently OMNeT++ 6.4). Rerun it after upgrading OMNeT++.
+### Running and debugging
+Above each runnable section:
+- **▶ Run (N runs)** runs it in a terminal. With several runs it asks which ones, showing the iteration variables that change between runs (`Run 4  load=50`; type `load=50` to filter). The runs come from `opp_run -q runs`; if OMNeT++ rejects the config, the button shows the error.
+- **Debug** starts a debug session of one run with the debug executable (`<project>_dbg`, built with `make MODE=debug` if it is missing) and `--debug-on-errors=true`, so the debugger stops where an OMNeT++ runtime error is raised. It needs the [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb) or [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) extension.
+- **Qtenv** runs it with the Qtenv GUI.
+- **Cluster**, if a cluster script is configured (see below).
+
+By default the simulation executable built by `opp_makemake` (named after the project folder) is run from the ini file's folder, with the NED path from the project's `.nedfolders` file. The same actions are in the command palette (*OMNeT++: Run Configuration…*).
+
+## Requirements
+
+- VS Code 1.80 or later.
+- An OMNeT++ installation (6.x recommended) for the option documentation, run counts, running and debugging. Without it, highlighting, NED-based completion, navigation and diagnostics still work, with a built-in list of option names. The extension uses the `opp_run` of `omnetppIni.omnetppRoot`, of `$OMNET_ROOT`, or in the `PATH`.
 
 ## Installation
 
-From the repository root, link the extension into your VS Code extensions directory and restart VS Code:
+Download the `.vsix` from the [releases](https://github.com/gabrielglzz/omnetpp-vscode/releases) and install it:
 
 ```bash
-ln -s "$PWD" ~/.vscode/extensions/omnetpp-vscode
+code --install-extension omnetpp-vscode-<version>.vsix
 ```
 
-(Copy the directory instead of linking it if you do not want it to follow your checkout.) Remove the link to uninstall.
+or use *Extensions: Install from VSIX…* in VS Code. To work on the extension, link the repository instead and reload VS Code:
 
-### Associating `.ini` files
+```bash
+ln -s "$PWD" ~/.vscode/extensions/gabrielglzz.omnetpp-vscode
+```
 
-`omnetpp.ini` files are always opened as *OMNeT++ INI*. The extension also claims the `.ini` extension, but VS Code's built-in `ini` language may win for other files (the status bar shows *Ini* instead of *OMNeT++ INI*). In that case add this to your user or workspace `settings.json`:
+`omnetpp.ini` files always open as *OMNeT++ INI*. If other `.ini` files open with the built-in *Ini* language (see the status bar), add this to your settings:
 
 ```json
-"files.associations": {
-    "*.ini": "omnetpp-ini"
+"files.associations": { "*.ini": "omnetpp-ini" }
+```
+
+## Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| `omnetppIni.omnetppRoot` | `$OMNET_ROOT` | OMNeT++ installation |
+| `omnetppIni.run.program` | `<project>` or `opp_run` | Simulation executable |
+| `omnetppIni.nedPath` | `.nedfolders` | NED path passed with `-n` |
+| `omnetppIni.run.extraArgs` | | Extra arguments for the simulation |
+| `omnetppIni.run.script` | | Project script to run configs instead of the executable |
+| `omnetppIni.debug.program` | `<project>_dbg` | Debug executable |
+| `omnetppIni.debug.buildCommand` | `make MODE=debug` | Builds the debug executable when it is missing |
+| `omnetppIni.debug.debugger` | `auto` | `lldb` (CodeLLDB) or `cppdbg` (C/C++) |
+| `omnetppIni.debug.userInterface` | `Cmdenv` | `Cmdenv` or `Qtenv` |
+| `omnetppIni.debug.extraArgs` | | Extra arguments in debug sessions |
+| `omnetppIni.cluster.script` | | Script that launches configs on a cluster; enables the Cluster button |
+| `omnetppIni.cluster.user`, `cluster.extraArgs` | | Cluster username and extra options |
+| `omnetppIni.codeLens.enable` | `true` | Show the Run / Debug / Qtenv buttons |
+| `omnetppIni.diagnostics.unknownParameters` | `true` | Warn about keys that match no parameter |
+
+### Project scripts
+
+Projects that launch simulations with their own scripts can configure them in the workspace's `.vscode/settings.json`. The run script is called from the workspace folder as `<script> [-r <runs>] [-Qt] <ini> <config>`, and the cluster script as `<script> [-b] [--array=<runs> | -r <runs>] <user> <ini> <config>[,<config>...]`. For example:
+
+```json
+{
+  "omnetppIni.run.script": "./run.sh",
+  "omnetppIni.cluster.script": "./submit.sh",
+  "omnetppIni.debug.buildCommand": "./build.sh debug"
 }
 ```
 
-Note that associating `*.ini` with `properties` does **not** fix the comment character: the built-in `ini` and `properties` languages share the same grammar, and VS Code takes the comment character from the `ini` language.
+## Limitations
+
+- NED files are scanned, not fully parsed: types, parameters, submodules, `extends` / `like` and statistics are read with a lightweight parser. When a module path cannot be resolved from the network, submodules are looked up by name.
+- Built-in NED types of OMNeT++ (`ned.DatarateChannel`…) are not indexed.
 
 ## Development
 
-The code in `src/` is split into pure modules (`parser.js`, `index.js`, `diagnostics.js`, `options.js`), which do not depend on VS Code, and `extension.js`, which registers the providers. The test scripts run with the Node bundled in VS Code (no `npm install` needed):
+`src/parser.js`, `index.js`, `ned.js`, `diagnostics.js` and `options.js` do not depend on VS Code; `extension.js` and `run.js` register the providers. There is no build step: reload VS Code (*Developer: Reload Window*) after a change. The test scripts run with the Node bundled in VS Code:
 
 ```bash
-CODE="/Applications/Visual Studio Code.app/Contents/MacOS/Code"
-# scopes assigned by the grammar to each token
-ELECTRON_RUN_AS_NODE=1 "$CODE" test/tokenize.js test/sample.ini
-# diagnostics for every ini file under a directory
-ELECTRON_RUN_AS_NODE=1 "$CODE" test/diagnose.js ../..
+CODE="/Applications/Visual Studio Code.app/Contents/MacOS/Code"   # or `code` on Linux
+ELECTRON_RUN_AS_NODE=1 "$CODE" test/tokenize.js test/sample.ini   # grammar scopes of each token
+ELECTRON_RUN_AS_NODE=1 "$CODE" test/diagnose.js <project dir>     # diagnostics of every ini file
+python3 package.py                                               # build the .vsix
 ```
 
-After a change, run *Developer: Reload Window* in VS Code. *Developer: Inspect Editor Tokens and Scopes* shows the scopes under the cursor, and the extension host log (*Output* → *Extension Host*) shows runtime errors.
+## License and disclaimer
+
+[MIT](LICENSE). This extension is an independent project, not affiliated with or endorsed by OpenSim Ltd. or the OMNeT++ project. It contains no part of OMNeT++: the option documentation shown in VS Code is read at runtime from your own OMNeT++ installation, which is subject to its own license.
