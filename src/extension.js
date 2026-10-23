@@ -10,6 +10,7 @@ const { parse, sectionAtLine, itemAt } = require('./parser');
 const { diagnose } = require('./diagnostics');
 const options = require('./options');
 const { NedIndex, keyName } = require('./ned');
+const { Runner } = require('./run');
 
 const LANG = 'omnetpp-ini';
 const SELECTOR = { language: LANG };
@@ -776,6 +777,12 @@ function activate(context) {
     refreshAll();
   }));
 
+  const runner = new Runner(index, context);
+  runner.register(context);
+  sub(vscode.workspace.onDidSaveTextDocument((d) => {
+    if (d.languageId === LANG) runner.invalidate();
+  }));
+
   const iniWatcher = vscode.workspace.createFileSystemWatcher('**/*.ini');
   const onIniDisk = (uri) => {
     const open = vscode.workspace.textDocuments.find((d) => d.fileName === uri.fsPath);
@@ -784,6 +791,7 @@ function activate(context) {
     if (text === undefined) index.delete(uri.fsPath);
     else index.set(uri.fsPath, text);
     refreshAll();
+    runner.invalidate();
   };
   iniWatcher.onDidCreate(onIniDisk);
   iniWatcher.onDidChange(onIniDisk);

@@ -1,8 +1,8 @@
 {
   "name": "omnetpp-ini",
   "displayName": "OMNeT++ INI",
-  "description": "OMNeT++ ini files: highlighting, '#' comments, completion, hover, go to definition and diagnostics",
-  "version": "0.5.0",
+  "description": "OMNeT++ ini files: highlighting, '#' comments, completion, hover, go to definition, diagnostics and running configs",
+  "version": "0.6.0",
   "publisher": "gabrielglzz",
   "engines": {
     "vscode": "^1.80.0"
@@ -46,8 +46,85 @@
           "type": "boolean",
           "default": true,
           "description": "Warn about keys whose parameter does not exist in the NED modules they match (resolved from the network of the ini file)."
+        },
+        "omnetppIni.codeLens.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run / Qtenv / Cluster above each section."
+        },
+        "omnetppIni.omnetppRoot": {
+          "type": "string",
+          "default": "",
+          "description": "OMNeT++ installation (OMNET_ROOT). Used to count runs with opp_run and exported to the terminals. Empty: use the OMNET_ROOT environment variable."
+        },
+        "omnetppIni.run.script": {
+          "type": "string",
+          "default": "./run.sh",
+          "description": "Script that runs a config locally, relative to the workspace folder. Called as: <script> [-r <runs>] [-Qt] <ini> <config>."
+        },
+        "omnetppIni.run.extraArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra options for the run script (e.g. -b to compile first)."
+        },
+        "omnetppIni.cluster.script": {
+          "type": "string",
+          "default": "./submit.sh",
+          "description": "Script that launches configs on the cluster, relative to the workspace folder. Called as: <script> [options] <user> <ini> <config>[,<config>...]."
+        },
+        "omnetppIni.cluster.user": {
+          "type": "string",
+          "default": "",
+          "description": "Cluster username (asked the first time)."
+        },
+        "omnetppIni.cluster.extraArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra options for the cluster script (e.g. -m 8 -p <partition> --tmp)."
         }
       }
+    },
+    "commands": [
+      {
+        "command": "omnetppIni.run",
+        "title": "Run Configuration…",
+        "category": "OMNeT++",
+        "icon": "$(play)"
+      },
+      {
+        "command": "omnetppIni.runQtenv",
+        "title": "Run Configuration in Qtenv…",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetppIni.runCluster",
+        "title": "Run Configurations on Cluster…",
+        "category": "OMNeT++",
+        "icon": "$(cloud-upload)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "omnetppIni.run",
+          "when": "editorLangId == omnetpp-ini"
+        },
+        {
+          "command": "omnetppIni.runQtenv",
+          "when": "editorLangId == omnetpp-ini"
+        },
+        {
+          "command": "omnetppIni.runCluster",
+          "when": "editorLangId == omnetpp-ini"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "omnetppIni.run",
+          "when": "editorLangId == omnetpp-ini",
+          "group": "navigation"
+        }
+      ]
     }
   }
 }
