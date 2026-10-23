@@ -290,7 +290,10 @@ function nedDiagnostics(file, doc, checkUnknown = true) {
     const pos = { line: e.line, start: e.keyStart + last.start, end: e.keyStart + last.start + last.text.length };
     const list = byName.get(last.text);
     if (!list) {
-      if (checkUnknown && !BUILTIN_PARAMS.has(last.text) && !statsForPath(before, file).byName.has(last.text)) {
+      // `**.rt = ${rt="FA"}` is the usual idiom to define an iteration variable
+      // (it names the runs and result files), not a mistake
+      const definesVariable = doc.varDefs.some((d) => d.entry === e);
+      if (checkUnknown && !definesVariable && !BUILTIN_PARAMS.has(last.text) && !statsForPath(before, file).byName.has(last.text)) {
         out.push({ ...pos, severity: 'warning', message: `No parameter '${last.text}' in the modules matched by '${before.map((g) => g.text).join('.')}'` });
       }
     } else if (list.every((p) => p.fixed)) {
