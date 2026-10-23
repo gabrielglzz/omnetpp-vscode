@@ -22,6 +22,7 @@ function lookup(name) {
 }
 
 const variables = new Map(data.variables.map((v) => [v.name, v]));
+const recorders = data.recorders || [];
 
 // Markdown documentation of an option.
 function optionMarkdown(o) {
@@ -37,5 +38,6 @@ module.exports = {
   generatedFrom: data.generatedFrom,
   lookup,
   variables,
+  recorders,
   optionMarkdown,
 };

@@ -4,7 +4,8 @@
 Usage: OMNET_ROOT=/path/to/omnetpp ./gen-options.py [opp_run binary]
 
 Parses `opp_run -h configdetails` (configuration options) and
-`opp_run -h configvars` (predefined ${variables}).
+`opp_run -h configvars` (predefined ${variables}) and
+`opp_run -h resultrecorders` (modes for result-recording-modes).
 """
 import json
 import os
@@ -82,6 +83,22 @@ def parse_variables(lines):
             if head.startswith('${')]
 
 
+def parse_recorders(lines):
+    start = next(i for i, l in enumerate(lines) if l.startswith('Result recorders')) + 1
+    recorders, name, body = [], None, []
+    for line in lines[start:]:
+        m = re.match(r'^  (\w+)\s*$', line)
+        if m:
+            if name:
+                recorders.append({'name': name, 'description': join(body)})
+            name, body = m.group(1), []
+        elif name and line.strip():
+            body.append(line.strip())
+    if name:
+        recorders.append({'name': name, 'description': join(body)})
+    return recorders
+
+
 def main():
     binary = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.environ.get('OMNET_ROOT', '/opt/omnet6.1'), 'bin', 'opp_run')
@@ -90,11 +107,12 @@ def main():
         'generatedFrom': version.split(',')[0],
         'options': parse_options(run(binary, 'configdetails')),
         'variables': parse_variables(run(binary, 'configvars')),
+        'recorders': parse_recorders(run(binary, 'resultrecorders')),
     }
     out = HERE / 'data' / 'options.json'
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(data, indent=1) + '\n')
-    print(f"{out}: {len(data['options'])} options, {len(data['variables'])} variables ({data['generatedFrom']})")
+    print(f"{out}: {len(data['options'])} options, {len(data['variables'])} variables, {len(data['recorders'])} recorders ({data['generatedFrom']})")
 
 
 if __name__ == '__main__':

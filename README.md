@@ -5,14 +5,20 @@ VS Code extension for OMNeT++ `.ini` files. Plain JavaScript, no build step or d
 - **Comments use `#`** (`Cmd+/` / `Ctrl+/`). VS Code's built-in `ini` language comments with `;`, which makes OMNeT++ 6 abort with *"Use hash mark instead of semicolon to start comments"*.
 - **Syntax highlighting** for `[General]`/`[Config X]` sections, `include`, `extends` (config names), `network`, global and per-object options (`sim-time-limit`, `**.typename`, `**.result-recording-modes`…), key patterns (`**`, `*`, `[*]`, `[0..3]`), iteration variables (`${load=10..100 step 10}`, `${a}`, `${x=1,2 ! y}`, predefined `${configname}`…), numbers with units (`5s`, `1e-6s`, `8KiB`), strings, functions and `\` line continuations.
 - **Completion**: configuration options (global ones only in `[General]`), per-object options after a `.`, `${` variables, config names after `extends =`, NED networks after `network =`, file paths after `include`, `true`/`false` for boolean options, recording modes.
+- **Submodules and statistics** from the NED files. After a `.` in a key, the extension resolves the module path from the network of the ini file (`network =`, also for fragments, through the files that include them): `**` matches any depth, `SW[*]` the submodules called `SW` of the current modules, and submodules declared with `like` match every implementation of the interface (and the types derived from them), since `typename` can select any of them. It then offers, in this order:
+  - the submodules (`**.net[*].` → `router[*]`; `**.router[*].` → `ppp[*]`, `queue`, `routing`),
+  - the statistics (`@statistic`, `@statisticTemplate`) of the module (`**.app[0].` → `endToEndDelay`, `throughput`…; templates appear with the name used in ini keys, e.g. `flow*-throughput`),
+  - the per-object options; after a statistic, the recording options (`result-recording-modes`, `vector-recording`…) come first.
+
+  In `result-recording-modes` values, the modes declared in the statistic's `record=` are offered as `+mode` (optional ones, off by default) and `-mode`, followed by every result recorder of OMNeT++ (`psquare`, `timeavg`, `stats`…). Hover and `F12` on a submodule or statistic in a key show its type or declaration.
 - **Hover**: documentation of options and predefined variables, definitions of iteration variables, fallback chain of a config (per `omnetpp.ini` that loads the file), NED file of the network.
 - **Go to definition / Find references** (`F12` / `Shift+F12`) for `include` files, configs (section headings and `extends`), `${variables}` and `network`.
 - **Outline and folding** by section, with includes and iteration variables.
 - **Diagnostics** reproducing the errors OMNeT++ raises when loading an ini file: `;` comments, indented lines (indentation means line continuation), invalid or duplicate section names, unknown or misplaced options (global options outside `[General]`, per-object options without `**.`), unknown per-object options, `No such config` in `extends`, cycles in the fallback chain, missing or circular includes. Undefined `${variables}` are reported as warnings.
 
-The extension indexes every `.ini` (and `.ned`, for network names) in the workspace. Configs and variables are resolved through the include graph: a fragment such as `fragments/traffic.ini` sees the configs of every `omnetpp.ini` that includes it. Fragments that no file includes are not checked for `extends` and variables.
+The extension indexes every `.ini` and `.ned` file in the workspace (NED files are scanned for networks, submodules, `extends`/`like` and statistics; it is not a full NED parser, and when a path cannot be resolved from the network, submodules are looked up by name). Configs and variables are resolved through the include graph: a fragment such as `fragments/traffic.ini` sees the configs of every `omnetpp.ini` that includes it. Fragments that no file includes are not checked for `extends` and variables.
 
-Option names and documentation come from `data/options.json`, generated from the OMNeT++ installation with `./gen-options.py` (`opp_run -h configdetails` / `-h configvars`, currently OMNeT++ 6.4). Rerun it after upgrading OMNeT++.
+Option names and documentation come from `data/options.json`, generated from the OMNeT++ installation with `./gen-options.py` (`opp_run -h configdetails`, `-h configvars` and `-h resultrecorders`, currently OMNeT++ 6.4). Rerun it after upgrading OMNeT++.
 
 ## Installation
 
