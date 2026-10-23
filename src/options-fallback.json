@@ -1,0 +1,1069 @@
+{
+ "options": [
+  {
+   "name": "abstract",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "allow-object-stealing-on-deletion",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "bin-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "check-signals",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-autoflush",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-config-name",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "cmdenv-event-banner-details",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-event-banners",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-express-mode",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-extra-stack",
+   "type": "double",
+   "unit": "B",
+   "default": "8KiB",
+   "scope": "global"
+  },
+  {
+   "name": "cmdenv-fake-gui",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-after-event-probability",
+   "type": "double",
+   "unit": null,
+   "default": "1",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-before-event-probability",
+   "type": "double",
+   "unit": null,
+   "default": "1",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-on-hold-numsteps",
+   "type": "custom",
+   "unit": null,
+   "default": "3",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-on-hold-probability",
+   "type": "double",
+   "unit": null,
+   "default": "0.5",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-on-simtime-numsteps",
+   "type": "custom",
+   "unit": null,
+   "default": "3",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-on-simtime-probability",
+   "type": "double",
+   "unit": null,
+   "default": "0.1",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-fake-gui-seed",
+   "type": "int",
+   "unit": null,
+   "default": "1",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-interactive",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-log-cleanup",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-log-finalization",
+   "type": "bool",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-log-initialization",
+   "type": "bool",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-log-level",
+   "type": "string",
+   "unit": null,
+   "default": "TRACE",
+   "scope": "per-object"
+  },
+  {
+   "name": "cmdenv-log-prefix",
+   "type": "string",
+   "unit": null,
+   "default": "[%l]",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-log-simulation",
+   "type": "bool",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-output-file",
+   "type": "filename",
+   "unit": null,
+   "default": "${resultdir}/${configname}-${iterationvarsf}#${repetition}.out",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-performance-display",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-progress-updates",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-redirect-output",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-runs-to-execute",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "cmdenv-status-frequency",
+   "type": "double",
+   "unit": "s",
+   "default": "2s",
+   "scope": "per-run"
+  },
+  {
+   "name": "cmdenv-stop-batch-on-error",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "config-recording",
+   "type": "custom",
+   "unit": null,
+   "default": "all",
+   "scope": "per-run"
+  },
+  {
+   "name": "configuration-class",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "constraint",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "cpu-time-limit",
+   "type": "double",
+   "unit": "s",
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "debug-on-errors",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "debug-statistics-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "debugger-attach-command",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "debugger-attach-on-error",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "global"
+  },
+  {
+   "name": "debugger-attach-on-startup",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "global"
+  },
+  {
+   "name": "debugger-attach-wait-time",
+   "type": "double",
+   "unit": "s",
+   "default": "20s",
+   "scope": "global"
+  },
+  {
+   "name": "description",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "display-name",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-object"
+  },
+  {
+   "name": "display-string",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-object"
+  },
+  {
+   "name": "eventlog-file",
+   "type": "filename",
+   "unit": null,
+   "default": "${resultdir}/${configname}-${iterationvarsf}#${repetition}.elog",
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-index-frequency",
+   "type": "double",
+   "unit": "B",
+   "default": "1 MiB",
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-max-size",
+   "type": "double",
+   "unit": "B",
+   "default": "10 GiB",
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-message-detail-pattern",
+   "type": "custom",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-min-truncated-size",
+   "type": "double",
+   "unit": "B",
+   "default": "1 GiB",
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-options",
+   "type": "custom",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-recording-intervals",
+   "type": "custom",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlog-snapshot-frequency",
+   "type": "double",
+   "unit": "B",
+   "default": "100 MiB",
+   "scope": "per-run"
+  },
+  {
+   "name": "eventlogmanager-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::envir::EventlogFileManager",
+   "scope": "per-run"
+  },
+  {
+   "name": "experiment-label",
+   "type": "string",
+   "unit": null,
+   "default": "${configname}",
+   "scope": "per-run"
+  },
+  {
+   "name": "extends",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "fingerprint",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "fingerprint-events",
+   "type": "string",
+   "unit": null,
+   "default": "*",
+   "scope": "per-run"
+  },
+  {
+   "name": "fingerprint-ingredients",
+   "type": "string",
+   "unit": null,
+   "default": "tplx",
+   "scope": "per-run"
+  },
+  {
+   "name": "fingerprint-modules",
+   "type": "string",
+   "unit": null,
+   "default": "*",
+   "scope": "per-run"
+  },
+  {
+   "name": "fingerprint-results",
+   "type": "string",
+   "unit": null,
+   "default": "*",
+   "scope": "per-run"
+  },
+  {
+   "name": "fingerprintcalculator-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cSingleFingerprintCalculator",
+   "scope": "per-run"
+  },
+  {
+   "name": "fname-append-host",
+   "type": "bool",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "futureeventset-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cEventHeap",
+   "scope": "per-run"
+  },
+  {
+   "name": "image-path",
+   "type": "path",
+   "unit": null,
+   "default": "./images",
+   "scope": "global"
+  },
+  {
+   "name": "iteration-nesting-order",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "load-libs",
+   "type": "filenames",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "max-module-nesting",
+   "type": "int",
+   "unit": null,
+   "default": "50",
+   "scope": "per-run"
+  },
+  {
+   "name": "measurement-label",
+   "type": "string",
+   "unit": null,
+   "default": "${iterationvars}",
+   "scope": "per-run"
+  },
+  {
+   "name": "module-eventlog-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "ned-package-exclusions",
+   "type": "custom",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "ned-path",
+   "type": "path",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "network",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "num-rngs",
+   "type": "int",
+   "unit": null,
+   "default": "1",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-scalar-db-commit-freq",
+   "type": "int",
+   "unit": null,
+   "default": "100000",
+   "scope": "global"
+  },
+  {
+   "name": "output-scalar-file",
+   "type": "filename",
+   "unit": null,
+   "default": "${resultdir}/${configname}-${iterationvarsf}#${repetition}.sca",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-scalar-file-append",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-scalar-precision",
+   "type": "int",
+   "unit": null,
+   "default": "17",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-vector-db-indexing",
+   "type": "custom",
+   "unit": null,
+   "default": "skip",
+   "scope": "global"
+  },
+  {
+   "name": "output-vector-file",
+   "type": "filename",
+   "unit": null,
+   "default": "${resultdir}/${configname}-${iterationvarsf}#${repetition}.vec",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-vector-file-append",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-vector-precision",
+   "type": "int",
+   "unit": null,
+   "default": "17",
+   "scope": "per-run"
+  },
+  {
+   "name": "output-vectors-memory-limit",
+   "type": "double",
+   "unit": "B",
+   "default": "16MiB",
+   "scope": "per-run"
+  },
+  {
+   "name": "outputscalarmanager-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::envir::OmnetppOutputScalarManager",
+   "scope": "per-run"
+  },
+  {
+   "name": "outputvectormanager-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::envir::OmnetppOutputVectorManager",
+   "scope": "per-run"
+  },
+  {
+   "name": "parallel-simulation",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "global"
+  },
+  {
+   "name": "param-record-as-scalar",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-object"
+  },
+  {
+   "name": "param-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "parameter-mutability-check",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "parsim-communications-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cFileCommunications",
+   "scope": "global"
+  },
+  {
+   "name": "parsim-num-partitions",
+   "type": "int",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "parsim-synchronization-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cNullMessageProtocol",
+   "scope": "global"
+  },
+  {
+   "name": "partition-id",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-object"
+  },
+  {
+   "name": "print-instantiated-ned-types",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "print-undisposed",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "print-unused-parameters",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "qtenv-default-config",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "qtenv-default-run",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "qtenv-extra-stack",
+   "type": "double",
+   "unit": "B",
+   "default": "80KiB",
+   "scope": "global"
+  },
+  {
+   "name": "qtenv-identicon-seed",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "real-time-limit",
+   "type": "double",
+   "unit": "s",
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "realtimescheduler-scaling",
+   "type": "double",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "record-eventlog",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "record-scalar-results",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "record-vector-results",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  },
+  {
+   "name": "repeat",
+   "type": "int",
+   "unit": null,
+   "default": "1",
+   "scope": "per-run"
+  },
+  {
+   "name": "replication-label",
+   "type": "string",
+   "unit": null,
+   "default": "#${repetition}",
+   "scope": "per-run"
+  },
+  {
+   "name": "result-dir",
+   "type": "string",
+   "unit": null,
+   "default": "results",
+   "scope": "per-run"
+  },
+  {
+   "name": "result-recording-modes",
+   "type": "string",
+   "unit": null,
+   "default": "default",
+   "scope": "per-object"
+  },
+  {
+   "name": "resultdir-subdivision",
+   "type": "bool",
+   "unit": null,
+   "default": "false",
+   "scope": "per-run"
+  },
+  {
+   "name": "rng-%",
+   "type": "int",
+   "unit": null,
+   "default": null,
+   "scope": "per-object"
+  },
+  {
+   "name": "rng-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cMersenneTwister",
+   "scope": "per-run"
+  },
+  {
+   "name": "rngmanager-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cRngManager",
+   "scope": "per-run"
+  },
+  {
+   "name": "runnumber-width",
+   "type": "int",
+   "unit": null,
+   "default": "0",
+   "scope": "per-run"
+  },
+  {
+   "name": "scalar-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "scheduler-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::cSequentialScheduler",
+   "scope": "per-run"
+  },
+  {
+   "name": "sectionbasedconfig-configreader-class",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "seed-%-lcg32",
+   "type": "int",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "seed-%-mt",
+   "type": "int",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "seed-%-mt-p%",
+   "type": "int",
+   "unit": null,
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "seed-set",
+   "type": "int",
+   "unit": null,
+   "default": "${runnumber}",
+   "scope": "per-run"
+  },
+  {
+   "name": "sim-time-limit",
+   "type": "double",
+   "unit": "s",
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "simtime-resolution",
+   "type": "custom",
+   "unit": null,
+   "default": "ps",
+   "scope": "global"
+  },
+  {
+   "name": "simtime-scale",
+   "type": "int",
+   "unit": null,
+   "default": "-12",
+   "scope": "global"
+  },
+  {
+   "name": "snapshot-file",
+   "type": "filename",
+   "unit": null,
+   "default": "${resultdir}/${configname}-${iterationvarsf}#${repetition}.sna",
+   "scope": "per-run"
+  },
+  {
+   "name": "snapshotmanager-class",
+   "type": "string",
+   "unit": null,
+   "default": "omnetpp::envir::FileSnapshotManager",
+   "scope": "per-run"
+  },
+  {
+   "name": "statistic-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "total-stack",
+   "type": "double",
+   "unit": "B",
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "typename",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "per-object"
+  },
+  {
+   "name": "user-interface",
+   "type": "string",
+   "unit": null,
+   "default": null,
+   "scope": "global"
+  },
+  {
+   "name": "vector-buffer",
+   "type": "double",
+   "unit": "B",
+   "default": "1MiB",
+   "scope": "per-object"
+  },
+  {
+   "name": "vector-record-empty",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "vector-record-eventnumbers",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "vector-recording",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-object"
+  },
+  {
+   "name": "vector-recording-intervals",
+   "type": "custom",
+   "unit": null,
+   "default": null,
+   "scope": "per-object"
+  },
+  {
+   "name": "warmup-period",
+   "type": "double",
+   "unit": "s",
+   "default": null,
+   "scope": "per-run"
+  },
+  {
+   "name": "warnings",
+   "type": "bool",
+   "unit": null,
+   "default": "true",
+   "scope": "per-run"
+  }
+ ],
+ "variables": [
+  {
+   "name": "runid"
+  },
+  {
+   "name": "inifile"
+  },
+  {
+   "name": "configname"
+  },
+  {
+   "name": "runnumber"
+  },
+  {
+   "name": "network"
+  },
+  {
+   "name": "experiment"
+  },
+  {
+   "name": "measurement"
+  },
+  {
+   "name": "replication"
+  },
+  {
+   "name": "processid"
+  },
+  {
+   "name": "datetime"
+  },
+  {
+   "name": "datetimef"
+  },
+  {
+   "name": "resultdir"
+  },
+  {
+   "name": "repetition"
+  },
+  {
+   "name": "seedset"
+  },
+  {
+   "name": "iterationvars"
+  },
+  {
+   "name": "iterationvarsf"
+  },
+  {
+   "name": "iterationvarsd"
+  }
+ ],
+ "recorders": [
+  {
+   "name": "avg"
+  },
+  {
+   "name": "count"
+  },
+  {
+   "name": "errorNan"
+  },
+  {
+   "name": "histogram"
+  },
+  {
+   "name": "ksplit"
+  },
+  {
+   "name": "last"
+  },
+  {
+   "name": "max"
+  },
+  {
+   "name": "mean"
+  },
+  {
+   "name": "min"
+  },
+  {
+   "name": "psquare"
+  },
+  {
+   "name": "rateavg"
+  },
+  {
+   "name": "stats"
+  },
+  {
+   "name": "sum"
+  },
+  {
+   "name": "timeWeightedHistogram"
+  },
+  {
+   "name": "timeavg"
+  },
+  {
+   "name": "totalCount"
+  },
+  {
+   "name": "vector"
+  }
+ ]
+}
