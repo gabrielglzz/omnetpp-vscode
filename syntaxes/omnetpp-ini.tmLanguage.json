@@ -1,0 +1,253 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OMNeT++ INI",
+  "scopeName": "source.omnetpp-ini",
+  "comment": "Option lists generated from `opp_run -h config` and `opp_run -h configvars` (OMNeT++ 6.4).",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#semicolon-comment" },
+    { "include": "#section" },
+    { "include": "#include" },
+    { "include": "#entry-extends" },
+    { "include": "#entry-network" },
+    { "include": "#entry" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "(#).*$",
+      "name": "comment.line.number-sign.omnetpp-ini",
+      "captures": {
+        "1": { "name": "punctuation.definition.comment.omnetpp-ini" }
+      }
+    },
+    "semicolon-comment": {
+      "comment": "OMNeT++ 6 aborts with 'Use hash mark instead of semicolon to start comments'",
+      "match": "^\\s*(;.*)$",
+      "captures": {
+        "1": { "name": "invalid.illegal.semicolon-comment.omnetpp-ini" }
+      }
+    },
+    "section": {
+      "match": "^\\s*(\\[)\\s*(?:(General)|(Config)\\s+([^\\]\\s]+)|([^\\]]*?))\\s*(\\])",
+      "name": "meta.section.omnetpp-ini",
+      "captures": {
+        "1": { "name": "punctuation.definition.section.begin.omnetpp-ini" },
+        "2": { "name": "entity.name.type.class.general.omnetpp-ini" },
+        "3": { "name": "storage.type.config.omnetpp-ini" },
+        "4": { "name": "entity.name.type.class.config.omnetpp-ini" },
+        "5": { "name": "invalid.illegal.section-name.omnetpp-ini" },
+        "6": { "name": "punctuation.definition.section.end.omnetpp-ini" }
+      }
+    },
+    "include": {
+      "match": "^\\s*(include)\\s+([^#]*?)\\s*(?=#|$)",
+      "name": "meta.include.omnetpp-ini",
+      "captures": {
+        "1": { "name": "keyword.control.import.include.omnetpp-ini" },
+        "2": { "name": "string.unquoted.include-path.omnetpp-ini" }
+      }
+    },
+    "entry-extends": {
+      "begin": "^\\s*(extends)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.option.omnetpp-ini" },
+        "2": { "name": "keyword.operator.assignment.omnetpp-ini" }
+      },
+      "end": "(?<![\\\\\\n])$",
+      "name": "meta.entry.extends.omnetpp-ini",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#line-continuation" },
+        { "match": "[^,\\s#\\\\]+", "name": "entity.other.inherited-class.config.omnetpp-ini" },
+        { "match": ",", "name": "punctuation.separator.comma.omnetpp-ini" }
+      ]
+    },
+    "entry-network": {
+      "begin": "^\\s*(network)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.option.omnetpp-ini" },
+        "2": { "name": "keyword.operator.assignment.omnetpp-ini" }
+      },
+      "end": "(?<![\\\\\\n])$",
+      "name": "meta.entry.network.omnetpp-ini",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#line-continuation" },
+        { "include": "#variable" },
+        { "include": "#string" },
+        { "match": "[A-Za-z_][\\w.]*", "name": "entity.name.type.network.omnetpp-ini" }
+      ]
+    },
+    "entry": {
+      "begin": "^\\s*([^\\s=#;\\[][^=#]*?)\\s*(=)",
+      "beginCaptures": {
+        "1": { "patterns": [{ "include": "#key" }] },
+        "2": { "name": "keyword.operator.assignment.omnetpp-ini" }
+      },
+      "end": "(?<![\\\\\\n])$",
+      "name": "meta.entry.omnetpp-ini",
+      "contentName": "meta.value.omnetpp-ini",
+      "patterns": [{ "include": "#value" }]
+    },
+    "key": {
+      "patterns": [
+        {
+          "comment": "Global and per-run options: a key without dots",
+          "match": "^(?:abstract|allow-object-stealing-on-deletion|check-signals|cmdenv-[\\w-]+|config-recording|configuration-class|constraint|cpu-time-limit|debug-on-errors|debug-statistics-recording|debugger-attach-[\\w-]+|description|eventlog-[\\w-]+|eventlogmanager-class|experiment-label|extends|fingerprint|fingerprint-[\\w-]+|fingerprintcalculator-class|fname-append-host|futureeventset-class|image-path|iteration-nesting-order|load-libs|max-module-nesting|measurement-label|ned-package-exclusions|ned-path|network|num-rngs|output-scalar-[\\w-]+|output-vector-[\\w-]+|output-vectors-memory-limit|outputscalarmanager-class|outputvectormanager-class|parallel-simulation|parameter-mutability-check|parsim-[\\w-]+|print-instantiated-ned-types|print-undisposed|print-unused-parameters|qtenv-[\\w-]+|real-time-limit|realtimescheduler-scaling|record-eventlog|record-scalar-results|record-vector-results|repeat|replication-label|result-dir|resultdir-subdivision|rng-class|rngmanager-class|runnumber-width|scheduler-class|sectionbasedconfig-configreader-class|seed-\\d+-lcg32|seed-\\d+-mt|seed-\\d+-mt-p\\d+|seed-set|sim-time-limit|simtime-resolution|simtime-scale|snapshot-file|snapshotmanager-class|total-stack|user-interface|warmup-period|warnings)$",
+          "name": "keyword.other.option.omnetpp-ini"
+        },
+        {
+          "comment": "Per-object options: last segment of a pattern key",
+          "match": "(?<=\\.)(?:bin-recording|cmdenv-log-level|display-name|display-string|module-eventlog-recording|param-record-as-scalar|param-recording|partition-id|result-recording-modes|rng-\\d+|scalar-recording|statistic-recording|typename|vector-buffer|vector-record-empty|vector-record-eventnumbers|vector-recording|vector-recording-intervals)$",
+          "name": "keyword.other.option.per-object.omnetpp-ini"
+        },
+        {
+          "comment": "Parameter name: last segment of the key",
+          "match": "(?<=^|\\.)[A-Za-z_][\\w-]*$",
+          "name": "variable.other.property.parameter.omnetpp-ini"
+        },
+        { "match": "\\*\\*|\\*|\\?", "name": "keyword.operator.wildcard.omnetpp-ini" },
+        {
+          "match": "(\\[)([^\\]]*)(\\])",
+          "captures": {
+            "1": { "name": "punctuation.definition.index.begin.omnetpp-ini" },
+            "2": { "patterns": [{ "include": "#key-index" }] },
+            "3": { "name": "punctuation.definition.index.end.omnetpp-ini" }
+          }
+        },
+        {
+          "match": "(\\{)([^}]*)(\\})",
+          "captures": {
+            "1": { "name": "punctuation.definition.set.begin.omnetpp-ini" },
+            "2": { "patterns": [{ "include": "#key-index" }] },
+            "3": { "name": "punctuation.definition.set.end.omnetpp-ini" }
+          }
+        },
+        { "match": "\\.", "name": "punctuation.accessor.omnetpp-ini" },
+        { "match": "[A-Za-z_][\\w-]*", "name": "variable.other.object.module.omnetpp-ini" }
+      ]
+    },
+    "key-index": {
+      "patterns": [
+        { "match": "\\*", "name": "keyword.operator.wildcard.omnetpp-ini" },
+        { "match": "\\.\\.", "name": "keyword.operator.range.omnetpp-ini" },
+        { "match": "\\d+", "name": "constant.numeric.integer.omnetpp-ini" },
+        { "match": ",", "name": "punctuation.separator.comma.omnetpp-ini" }
+      ]
+    },
+    "value": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#line-continuation" },
+        { "include": "#string" },
+        { "include": "#variable" },
+        { "include": "#expression" }
+      ]
+    },
+    "line-continuation": {
+      "match": "\\\\$",
+      "name": "constant.character.escape.line-continuation.omnetpp-ini"
+    },
+    "string": {
+      "begin": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.omnetpp-ini" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.omnetpp-ini" }
+      },
+      "name": "string.quoted.double.omnetpp-ini",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.omnetpp-ini" },
+        { "include": "#variable" }
+      ]
+    },
+    "variable": {
+      "patterns": [
+        {
+          "comment": "Predefined variables, e.g. ${configname}",
+          "match": "(\\$\\{)\\s*(runid|inifile|configname|runnumber|network|experiment|measurement|replication|processid|datetime|datetimef|resultdir|repetition|seedset|iterationvars|iterationvarsf|iterationvarsd)\\s*(\\})",
+          "name": "meta.interpolation.omnetpp-ini",
+          "captures": {
+            "1": { "name": "punctuation.definition.variable.begin.omnetpp-ini" },
+            "2": { "name": "variable.language.predefined.omnetpp-ini" },
+            "3": { "name": "punctuation.definition.variable.end.omnetpp-ini" }
+          }
+        },
+        {
+          "comment": "Reference to an iteration variable, e.g. ${load}",
+          "match": "(\\$\\{)\\s*([A-Za-z_]\\w*)\\s*(\\})",
+          "name": "meta.interpolation.omnetpp-ini",
+          "captures": {
+            "1": { "name": "punctuation.definition.variable.begin.omnetpp-ini" },
+            "2": { "name": "variable.other.iteration.omnetpp-ini" },
+            "3": { "name": "punctuation.definition.variable.end.omnetpp-ini" }
+          }
+        },
+        {
+          "comment": "Iteration, e.g. ${load=10..100 step 10}, ${a=1,2,3 ! b}",
+          "begin": "(\\$\\{)(?:\\s*([A-Za-z_]\\w*)\\s*(=))?",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.variable.begin.omnetpp-ini" },
+            "2": { "name": "variable.other.iteration.definition.omnetpp-ini" },
+            "3": { "name": "keyword.operator.assignment.omnetpp-ini" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.variable.end.omnetpp-ini" }
+          },
+          "name": "meta.interpolation.iteration.omnetpp-ini",
+          "patterns": [
+            { "match": "\\bstep\\b", "name": "keyword.control.step.omnetpp-ini" },
+            { "match": "\\.\\.", "name": "keyword.operator.range.omnetpp-ini" },
+            {
+              "match": "(!)\\s*([A-Za-z_]\\w*)",
+              "captures": {
+                "1": { "name": "keyword.operator.parallel.omnetpp-ini" },
+                "2": { "name": "variable.other.iteration.omnetpp-ini" }
+              }
+            },
+            { "include": "#string" },
+            { "include": "#variable" },
+            { "include": "#expression" }
+          ]
+        }
+      ]
+    },
+    "expression": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.])0[xX][0-9a-fA-F]+\\b",
+          "name": "constant.numeric.hex.omnetpp-ini"
+        },
+        {
+          "comment": "Number with optional unit, e.g. 5s, 1e-6s, 8KiB. '\\.(?!\\.)' keeps 10..100 apart",
+          "match": "(?<!\\w)(?<![^.]\\.)(?<!^\\.)((?:\\d+(?:\\.(?!\\.)\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)([A-Za-z]+)?",
+          "captures": {
+            "1": { "name": "constant.numeric.omnetpp-ini" },
+            "2": { "name": "keyword.other.unit.omnetpp-ini" }
+          }
+        },
+        { "match": "\\b(?:true|false)\\b", "name": "constant.language.boolean.omnetpp-ini" },
+        { "match": "\\b(?:nan|inf|null|nullptr|undefined)\\b", "name": "constant.language.omnetpp-ini" },
+        { "match": "\\b(?:default|ask)\\b(?!\\s*\\()", "name": "constant.language.special-value.omnetpp-ini" },
+        {
+          "match": "\\b(?:this|parent|index|sizeof|exists|typename)\\b",
+          "name": "keyword.other.ned.omnetpp-ini"
+        },
+        {
+          "match": "\\b([A-Za-z_]\\w*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "support.function.omnetpp-ini" }
+          }
+        },
+        {
+          "match": "==|!=|<=>|<=|>=|=~|&&|\\|\\||<<|>>|[-+*/%^<>!?:&|~]",
+          "name": "keyword.operator.omnetpp-ini"
+        },
+        { "match": ",", "name": "punctuation.separator.comma.omnetpp-ini" }
+      ]
+    }
+  }
+}
