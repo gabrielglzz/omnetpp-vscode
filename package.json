@@ -2,7 +2,7 @@
   "name": "omnetpp-ini",
   "displayName": "OMNeT++ INI",
   "description": "OMNeT++ ini files: highlighting, '#' comments, completion, hover, go to definition, diagnostics and running configs",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "gabrielglzz",
   "engines": {
     "vscode": "^1.80.0"
@@ -81,6 +81,40 @@
           "type": "string",
           "default": "",
           "description": "Extra options for the cluster script (e.g. -m 8 -p <partition> --tmp)."
+        },
+        "omnetppIni.debug.debugger": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "lldb",
+            "cppdbg"
+          ],
+          "default": "auto",
+          "description": "Debugger extension: CodeLLDB (lldb), Microsoft C/C++ (cppdbg), or the first one installed (auto)."
+        },
+        "omnetppIni.debug.program": {
+          "type": "string",
+          "default": "",
+          "description": "Debug binary, relative to the workspace folder. Empty: <workspace folder name>_dbg, as built by ./build.sh debug."
+        },
+        "omnetppIni.debug.buildCommand": {
+          "type": "string",
+          "default": "./build.sh debug",
+          "description": "Command that builds the debug binary when it is missing."
+        },
+        "omnetppIni.debug.userInterface": {
+          "type": "string",
+          "enum": [
+            "Cmdenv",
+            "Qtenv"
+          ],
+          "default": "Cmdenv",
+          "description": "OMNeT++ user interface for debug sessions."
+        },
+        "omnetppIni.debug.extraArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra arguments for the simulation in debug sessions (e.g. --cmdenv-express-mode=false)."
         }
       }
     },
@@ -95,6 +129,12 @@
         "command": "omnetppIni.runQtenv",
         "title": "Run Configuration in Qtenv…",
         "category": "OMNeT++"
+      },
+      {
+        "command": "omnetppIni.debug",
+        "title": "Debug Configuration…",
+        "category": "OMNeT++",
+        "icon": "$(debug)"
       },
       {
         "command": "omnetppIni.runCluster",
@@ -115,6 +155,10 @@
         },
         {
           "command": "omnetppIni.runCluster",
+          "when": "editorLangId == omnetpp-ini"
+        },
+        {
+          "command": "omnetppIni.debug",
           "when": "editorLangId == omnetpp-ini"
         }
       ],

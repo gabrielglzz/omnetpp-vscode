@@ -4,6 +4,7 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const { execFile } = require('child_process');
 const vscode = require('vscode');
 
@@ -185,6 +186,92 @@ class Runner {
     this.execute(`Cluster: ${configs.join(',')}`, root, args);
   }
 
+  // ------------------------------------------------------------ debugging
+
+  // Debug binary: <workspace>/<workspace dir name>_dbg (./build.sh debug).
+  debugProgram(root) {
+    const ws = this.workspaceDir(root);
+    const p = setting('debug.program', '') || `${path.basename(ws)}_dbg`;
+    return path.isAbsolute(p) ? p : path.join(ws, p);
+  }
+
+  // Debugger extension to use: 'lldb' (CodeLLDB) or 'cppdbg' (Microsoft C/C++).
+  async debuggerType() {
+    const pref = setting('debug.debugger', 'auto');
+    const has = (id) => Boolean(vscode.extensions.getExtension(id));
+    if ((pref === 'auto' || pref === 'lldb') && has('vadimcn.vscode-lldb')) return 'lldb';
+    if ((pref === 'auto' || pref === 'cppdbg') && has('ms-vscode.cpptools')) return 'cppdbg';
+    const install = await vscode.window.showWarningMessage(
+      'Debugging needs a C++ debugger extension: CodeLLDB or Microsoft C/C++.', 'Install CodeLLDB', 'Install C/C++');
+    if (install) {
+      const id = install === 'Install CodeLLDB' ? 'vadimcn.vscode-lldb' : 'ms-vscode.cpptools';
+      await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+      vscode.window.showInformationMessage(`Installing ${id}: launch the debug session again when it finishes.`);
+    }
+    return undefined;
+  }
+
+  // Runs `./build.sh debug` as a task and resolves to true if it succeeds.
+  buildDebug(root) {
+    const ws = this.workspaceDir(root);
+    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
+    const task = new vscode.Task({ type: 'shell', task: 'build-debug' }, folder || vscode.TaskScope.Workspace,
+      'Build (debug)', 'OMNeT++', new vscode.ShellExecution(setting('debug.buildCommand', './build.sh debug'), { cwd: ws, env: omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined }));
+    task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true };
+    return new Promise((resolve) => {
+      const done = vscode.tasks.onDidEndTaskProcess((e) => {
+        if (e.execution.task === task || e.execution.task.name === task.name) {
+          done.dispose();
+          resolve(e.exitCode === 0);
+        }
+      });
+      vscode.tasks.executeTask(task).then(undefined, () => { done.dispose(); resolve(false); });
+    });
+  }
+
+  async debug(file, config) {
+    const root = await this.pickRoot(file);
+    if (!root) return;
+    const type = await this.debuggerType();
+    if (!type) return;
+    const program = this.debugProgram(root);
+    if (!fs.existsSync(program)) {
+      const ok = await vscode.window.showWarningMessage(
+        `Debug binary not found: ${vscode.workspace.asRelativePath(program)}`, 'Build it (./build.sh debug)');
+      if (!ok || !(await this.buildDebug(root)) || !fs.existsSync(program)) return;
+    }
+    // A single run: the debugger runs one process
+    const res = await this.countRuns(root, config);
+    let run = '0';
+    if (res.runs > 1) {
+      const items = [];
+      for (let i = 0; i < Math.min(res.runs, 50); i++) items.push({ label: `Run ${i}`, run: String(i) });
+      const pick = await vscode.window.showQuickPick(items, { title: `Debug ${config} (${res.runs} runs)`, placeHolder: 'Run to debug' });
+      if (!pick) return;
+      run = pick.run;
+    }
+    const ws = this.workspaceDir(root);
+    const args = ['-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', ws,
+      '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
+    const env = {};
+    if (omnetppRoot()) {
+      env.OMNET_ROOT = omnetppRoot();
+      env.PATH = `${path.join(omnetppRoot(), 'bin')}:${process.env.PATH}`;
+      env[process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'] = path.join(omnetppRoot(), 'lib');
+    }
+    const name = `Debug ${config} #${run}`;
+    const cwd = path.dirname(root);
+    const configuration = type === 'lldb'
+      ? { type, request: 'launch', name, program, args, cwd, env }
+      : {
+        type, request: 'launch', name, program, args, cwd, externalConsole: false,
+        MIMode: process.platform === 'darwin' ? 'lldb' : 'gdb',
+        environment: Object.entries(env).map(([n, value]) => ({ name: n, value })),
+      };
+    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
+    await vscode.debug.startDebugging(folder, configuration);
+  }
+
   // ------------------------------------------------------------ CodeLens
 
   provideCodeLenses(document) {
@@ -201,6 +288,7 @@ class Runner {
       const lens = new vscode.CodeLens(range);
       lens.data = { file: document.fileName, config: s.name, roots };
       lenses.push(lens);
+      lenses.push(new vscode.CodeLens(range, { title: '$(debug) Debug', tooltip: 'Debug a run with the debug binary (./build.sh debug)', command: 'omnetppIni.debug', arguments: args }));
       lenses.push(new vscode.CodeLens(range, { title: '$(debug-alt) Qtenv', tooltip: 'Run 0 with the Qtenv GUI', command: 'omnetppIni.runQtenv', arguments: args }));
       lenses.push(new vscode.CodeLens(range, { title: '$(cloud-upload) Cluster', tooltip: 'Launch on the cluster with ./submit.sh', command: 'omnetppIni.runCluster', arguments: args }));
     }
@@ -275,6 +363,14 @@ class Runner {
         [file, config] = [p.file, p.configs[0]];
       }
       return this.run(file, config, true);
+    }));
+    sub(vscode.commands.registerCommand('omnetppIni.debug', async (file, config) => {
+      if (!file) {
+        const p = await this.pickConfigs(false);
+        if (!p) return;
+        [file, config] = [p.file, p.configs[0]];
+      }
+      return this.debug(file, config);
     }));
     sub(vscode.commands.registerCommand('omnetppIni.runCluster', async (file, config) => {
       let configs = config ? [config] : null;
