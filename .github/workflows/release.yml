@@ -1,0 +1,50 @@
+name: Release
+
+# Pushing a tag vX.Y.Z publishes a GitHub release with the .vsix, after the
+# tests. The version of package.json must be X.Y.Z, and the notes are the
+# "## X.Y.Z" section of CHANGELOG.md.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Release ${{ github.ref_name }}
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the version
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error file=package.json::the tag is $GITHUB_REF_NAME but package.json has version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build the .vsix
+        run: python3 package.py "omnetpp-vscode-$VERSION.vsix"
+      - name: Release notes
+        run: |
+          python3 - <<'PY'
+          import os, re
+          version = os.environ['VERSION']
+          m = re.search(rf'^## {re.escape(version)}\n(.*?)(?=^## |\Z)', open('CHANGELOG.md').read(), re.S | re.M)
+          if not m:
+              raise SystemExit(f'::error file=CHANGELOG.md::no "## {version}" section')
+          notes = m.group(1).strip()
+          open('notes.md', 'w').write(f'{notes}\n\nInstall: `code --install-extension omnetpp-vscode-{version}.vsix`\n')
+          PY
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "omnetpp-vscode-$VERSION.vsix" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

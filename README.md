@@ -131,6 +131,14 @@ python3 package.py                                               # build the .vs
 
 The tests activate the extension on `test/fixtures/project` with a stub of the `vscode` module. The expected diagnostics are written in its ini files as `# expect warning: <part of the message>` comments on their line.
 
+To release version X.Y.Z, set `"version": "X.Y.Z"` in `package.json` and rename the `## Unreleased` section of `CHANGELOG.md` to `## X.Y.Z`, merge, and push the tag:
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+The *Release* workflow runs the tests, builds `omnetpp-vscode-X.Y.Z.vsix` and publishes a GitHub release with it and the notes of that section.
+
 ## License and disclaimer
 
 [MIT](LICENSE). This extension is an independent project, not affiliated with or endorsed by OpenSim Ltd. or the OMNeT++ project. It contains no part of OMNeT++: the option documentation shown in VS Code is read at runtime from your own OMNeT++ installation, which is subject to its own license.
