@@ -103,9 +103,22 @@ class Runner {
     return root ? { ...process.env, OMNET_ROOT: root } : process.env;
   }
 
+  // Workspace folder of a file, which the paths in the settings are relative
+  // to, or its folder if it is outside the workspace.
   workspaceDir(file) {
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file));
     return folder ? folder.uri.fsPath : path.dirname(file);
+  }
+
+  // Folder of the OMNeT++ project of a file: the nearest folder above it with
+  // a .project or .oppbuildspec file, as the IDE sees projects, or else its
+  // workspace folder. A workspace folder may hold several projects (samples/),
+  // and a file may be outside the workspace.
+  projectDir(file) {
+    for (let d = path.dirname(file); ; d = path.dirname(d)) {
+      if (fs.existsSync(path.join(d, '.oppbuildspec')) || fs.existsSync(path.join(d, '.project'))) return d;
+      if (path.dirname(d) === d) return this.workspaceDir(file);
+    }
   }
 
   // Folders that may hold the projects a project uses: the workspace folders
@@ -126,8 +139,8 @@ class Runner {
   // Folders of the projects the project of `root` uses (its .project), each
   // before the projects that use it.
   references(root) {
-    const ws = this.workspaceDir(root);
-    return project.references(ws, this.projectCandidates(ws));
+    const dir = this.projectDir(root);
+    return project.references(dir, this.projectCandidates(dir));
   }
 
   // What runs the simulation, in release or debug mode: {command, output}
@@ -139,7 +152,7 @@ class Runner {
       const program = path.isAbsolute(p) ? p : path.join(this.workspaceDir(root), p);
       return { command: [program], output: program };
     }
-    return project.target(this.workspaceDir(root), debug, oppRun(debug));
+    return project.target(this.projectDir(root), debug, oppRun(debug));
   }
 
   // Parallel jobs of the build: omnetppIni.build.jobs, or the number of CPUs
@@ -148,15 +161,21 @@ class Runner {
     return setting('build.jobs', 0) || Math.max(os.cpus().length - 1, 1);
   }
 
-  // Command that builds the project of `root`, run from its folder: the
-  // omnetppIni.run.buildCommand / debug.buildCommand setting, with `${mode}`
+  // Command that builds the project of `root`, as {dir, command}, `dir` being
+  // the folder to run it from: the omnetppIni.run.buildCommand /
+  // debug.buildCommand setting, run from the workspace folder, with `${mode}`
   // replaced by release or debug and `${jobs}` by the parallel jobs, or make
-  // or the .oppbuildspec (see project.buildCommand). Null if there is no way
-  // to build it.
+  // or the .oppbuildspec, run from the project folder (see
+  // project.buildCommand). Null if there is no way to build it.
   buildCommand(root, debug = false) {
     const configured = setting(debug ? 'debug.buildCommand' : 'run.buildCommand', '');
-    if (configured) return configured.replace(/\$\{mode\}/g, debug ? 'debug' : 'release').replace(/\$\{jobs\}/g, String(this.jobs()));
-    return project.buildCommand(this.workspaceDir(root), debug, this.jobs());
+    if (configured) {
+      const command = configured.replace(/\$\{mode\}/g, debug ? 'debug' : 'release').replace(/\$\{jobs\}/g, String(this.jobs()));
+      return { dir: this.workspaceDir(root), command };
+    }
+    const dir = this.projectDir(root);
+    const command = project.buildCommand(dir, debug, this.jobs());
+    return command && { dir, command };
   }
 
   // Does `target` of the project in `dir` need building? Per
@@ -178,7 +197,7 @@ class Runner {
   // their make or .oppbuildspec), in a single task; resolves to true when it
   // can be run.
   async ensureBuilt(root, target, debug) {
-    const ws = this.workspaceDir(root);
+    const dir = this.projectDir(root);
     const refs = this.references(root);
     const steps = [];
     for (const ref of refs) {
@@ -186,11 +205,11 @@ class Runner {
       const command = this.needsBuild(ref, t) && project.buildCommand(ref, debug, this.jobs());
       if (command) steps.push({ dir: ref, command, output: t.output });
     }
-    const linked = [...refs, ...setting('build.watch', []).map((d) => path.resolve(ws, d))];
-    if (steps.length || this.needsBuild(ws, target, linked)) {
-      const command = this.buildCommand(root, debug);
-      if (command) {
-        steps.push({ dir: ws, command, output: target.output });
+    const linked = [...refs, ...setting('build.watch', []).map((d) => path.resolve(this.workspaceDir(root), d))];
+    if (steps.length || this.needsBuild(dir, target, linked)) {
+      const build = this.buildCommand(root, debug);
+      if (build) {
+        steps.push({ ...build, output: target.output });
       } else if (target.output && !fs.existsSync(target.output)) {
         vscode.window.showWarningMessage(`Simulation not built: ${vscode.workspace.asRelativePath(target.output)} (no Makefile or .oppbuildspec; set omnetppIni.${debug ? 'debug' : 'run'}.buildCommand)`);
         return false;
@@ -216,20 +235,19 @@ class Runner {
   // the .nedfolders files (OMNeT++ project convention) of the project and of
   // the projects it uses, or their folders.
   nedPath(root) {
-    const ws = this.workspaceDir(root);
     const configured = setting('nedPath', '');
-    if (configured) return configured.split(path.delimiter).map((d) => path.resolve(ws, d)).join(path.delimiter);
+    if (configured) return configured.split(path.delimiter).map((d) => path.resolve(this.workspaceDir(root), d)).join(path.delimiter);
     const folders = (dir) => {
       const listed = project.readList(dir, '.nedfolders');
       return (listed.length ? listed : ['.']).map((d) => path.resolve(dir, d));
     };
-    return [ws, ...this.references(root)].flatMap(folders).join(path.delimiter);
+    return [this.projectDir(root), ...this.references(root)].flatMap(folders).join(path.delimiter);
   }
 
   // NED packages excluded with -x: the ones listed in the .nedexclusions files
   // of the project and of the projects it uses, as [] or ['-x', list].
   nedExclusions(root) {
-    const pkgs = [this.workspaceDir(root), ...this.references(root)].flatMap((d) => project.readList(d, '.nedexclusions'));
+    const pkgs = [this.projectDir(root), ...this.references(root)].flatMap((d) => project.readList(d, '.nedexclusions'));
     return pkgs.length ? ['-x', pkgs.join(';')] : [];
   }
 
@@ -244,7 +262,7 @@ class Runner {
       env.PATH = `${path.join(omnetppRoot(), 'bin')}${path.delimiter}${process.env.PATH}`;
     }
     if (root) {
-      for (const d of [...this.references(root), this.workspaceDir(root)]) env[project.rootVariable(d)] = d;
+      for (const d of [...this.references(root), this.projectDir(root)]) env[project.rootVariable(d)] = d;
     }
     return Object.keys(env).length ? env : undefined;
   }
@@ -264,7 +282,20 @@ class Runner {
     const terminal = vscode.window.createTerminal({ name, cwd, env: this.shellEnv(root) });
     terminal.show();
     const command = args.map(quote).join(' ');
-    terminal.sendText(setenv ? this.withSetenv(`exec ${command}`) : command);
+    terminal.sendText(this.shortCommand(name, setenv ? this.withSetenv(`exec ${command}`) : command));
+  }
+
+  // `command`, or if it is long, a command that runs it from a script. The
+  // terminal may get the text before the shell reads it, and the terminal
+  // driver cuts longer input lines (at 1024 bytes on macOS): the NED path and
+  // exclusions of a project that uses INET are longer.
+  shortCommand(name, command) {
+    if (command.length < 512) return command;
+    const dir = path.join(this.context.globalStorageUri ? this.context.globalStorageUri.fsPath : os.tmpdir(), 'commands');
+    const file = path.join(dir, `${name.replace(/[^\w.-]+/g, '_')}.sh`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, `#!/bin/sh\n# ${name}\n${command}\n`);
+    return `sh ${quote(file)}`;
   }
 
   // Asks which runs to execute: [] for run 0 (the default), ['-r', x] otherwise.
@@ -395,26 +426,40 @@ class Runner {
     });
   }
 
+  // Asks which run to debug, as the debugger runs a single process: its
+  // number, or undefined if cancelled. When the runs cannot be counted, the
+  // number is typed.
+  async pickDebugRun(root, config) {
+    const res = await this.countRuns(root, config);
+    if (res.runs === 1) return '0';
+    const items = [];
+    for (let i = 0; i < (res.runs || 0); i++) items.push({ label: `Run ${i}`, description: res.labels[i], run: String(i) });
+    items.push({ label: '$(edit) Other…', description: 'run number', custom: true });
+    const pick = await vscode.window.showQuickPick(items, {
+      title: `Debug ${config}${res.runs ? ` (${res.runs} runs)` : ''}`,
+      placeHolder: res.error ? `${res.error}: choose Other… to type the run` : 'Run to debug (type e.g. load=50 to filter)',
+      matchOnDescription: true,
+    });
+    if (!pick) return undefined;
+    if (!pick.custom) return pick.run;
+    const value = await vscode.window.showInputBox({
+      title: `Debug ${config}: run`, prompt: 'Run number', value: '0',
+      validateInput: (v) => (/^\d+$/.test(v.trim()) ? null : 'A run number'),
+    });
+    return value === undefined ? undefined : value.trim();
+  }
+
   async debug(file, config) {
     const root = await this.pickRoot(file);
     if (!root) return;
     const type = await this.debuggerType();
     if (!type) return;
+    // The run first, as Run does: the build may take long
+    const run = await this.pickDebugRun(root, config);
+    if (run === undefined) return;
     const target = this.target(root, true);
     if (!(await this.ensureBuilt(root, target, true))) return;
     const [program, ...programArgs] = target.command;
-    // A single run: the debugger runs one process
-    const res = await this.countRuns(root, config);
-    let run = '0';
-    if (res.runs > 1) {
-      const items = [];
-      for (let i = 0; i < res.runs; i++) items.push({ label: `Run ${i}`, description: res.labels[i], run: String(i) });
-      const pick = await vscode.window.showQuickPick(items, {
-        title: `Debug ${config} (${res.runs} runs)`, placeHolder: 'Run to debug (type e.g. load=50 to filter)', matchOnDescription: true,
-      });
-      if (!pick) return;
-      run = pick.run;
-    }
     const args = [...programArgs, '-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', this.nedPath(root),
       ...this.nedExclusions(root), '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
     const env = { ...this.shellEnv(root) };
