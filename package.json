@@ -114,12 +114,12 @@
         "omnetppIni.debug.program": {
           "type": "string",
           "default": "",
-          "description": "Debug executable, relative to the workspace folder. Empty: <workspace folder name>_dbg, as opp_makemake builds it with MODE=debug."
+          "description": "Debug executable, relative to the workspace folder. Empty: the debug build (_dbg) of the target of the project's .oppbuildspec (a shared library is run with opp_run_dbg -l), or <workspace folder name>_dbg."
         },
         "omnetppIni.debug.buildCommand": {
           "type": "string",
-          "default": "make MODE=debug",
-          "description": "Command (run from the workspace folder) that builds the debug executable when it is missing."
+          "default": "",
+          "description": "Command (run from the workspace folder) that builds the debug executable, such as a project build script; ${mode} is replaced by debug and ${jobs} by omnetppIni.build.jobs. Empty: make -j<jobs> MODE=debug in the workspace folder if it has a Makefile, otherwise in each makemake folder of the project's .oppbuildspec, creating its Makefile with opp_makemake (and the options the IDE stored there) if it is missing."
         },
         "omnetppIni.debug.userInterface": {
           "type": "string",
@@ -138,7 +138,35 @@
         "omnetppIni.run.program": {
           "type": "string",
           "default": "",
-          "description": "Simulation executable, relative to the workspace folder. Empty: the executable opp_makemake builds (named after the workspace folder) if it exists, otherwise opp_run."
+          "description": "Simulation executable, relative to the workspace folder. Empty: the target of the makemake folder of the project's .oppbuildspec (an executable, or a shared library run with opp_run -l), or the executable opp_makemake builds in the workspace folder (named after it), otherwise opp_run."
+        },
+        "omnetppIni.build.when": {
+          "type": "string",
+          "enum": ["changed", "missing", "always"],
+          "enumDescriptions": [
+            "When it has not been built, or a source file (.cc, .h, .msg…), build file or omnetppIni.build.watch folder changed since the last build",
+            "Only when it has not been built",
+            "Every time (make only rebuilds what changed, but checking takes a while in large projects)"
+          ],
+          "default": "changed",
+          "description": "When Run, Qtenv and Debug build the simulation before launching it."
+        },
+        "omnetppIni.build.jobs": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "Parallel jobs of the build (make -j), also ${jobs} in the build commands. 0: the number of CPUs minus one."
+        },
+        "omnetppIni.build.watch": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Folders of other libraries the project depends on (relative to the workspace folder, or absolute): a change in their sources or libraries also rebuilds the simulation. The projects in the Project References of .project are watched without being listed here."
+        },
+        "omnetppIni.run.buildCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Command (run from the workspace folder) that builds the simulation, such as a project build script; ${mode} is replaced by release and ${jobs} by omnetppIni.build.jobs. Empty: make -j<jobs> MODE=release in the workspace folder if it has a Makefile, otherwise in each makemake folder of the project's .oppbuildspec, creating its Makefile with opp_makemake (and the options the IDE stored there) if it is missing."
         },
         "omnetppIni.nedPath": {
           "type": "string",

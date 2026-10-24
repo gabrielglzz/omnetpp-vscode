@@ -6,8 +6,12 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { execFile } = require('child_process');
 const vscode = require('vscode');
+const project = require('./project');
+
+const { quote } = project;
 
 const CONFIG = 'omnetppIni';
 
@@ -15,18 +19,15 @@ function setting(key, fallback) {
   return vscode.workspace.getConfiguration(CONFIG).get(key, fallback);
 }
 
-// Single-quotes an argument for the shell when needed.
-function quote(arg) {
-  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${String(arg).replace(/'/g, `'\\''`)}'`;
-}
-
 function omnetppRoot() {
   return setting('omnetppRoot', '') || process.env.OMNET_ROOT || '';
 }
 
-function oppRun() {
+// opp_run, or opp_run_dbg for debug builds, from the OMNeT++ installation.
+function oppRun(debug = false) {
   const root = omnetppRoot();
-  return root ? path.join(root, 'bin', 'opp_run') : 'opp_run';
+  const name = debug ? 'opp_run_dbg' : 'opp_run';
+  return root ? path.join(root, 'bin', name) : name;
 }
 
 class Runner {
@@ -102,47 +103,199 @@ class Runner {
     return root ? { ...process.env, OMNET_ROOT: root } : process.env;
   }
 
+  // Workspace folder of a file, which the paths in the settings are relative
+  // to, or its folder if it is outside the workspace.
   workspaceDir(file) {
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file));
     return folder ? folder.uri.fsPath : path.dirname(file);
   }
 
-  // Simulation executable: the omnetppIni.run.program setting, or the
-  // executable opp_makemake builds (named after the project directory, with
-  // `suffix` for debug builds), or opp_run.
-  program(root, suffix = '') {
-    const ws = this.workspaceDir(root);
-    const p = setting(suffix ? 'debug.program' : 'run.program', '');
-    if (p) return path.isAbsolute(p) ? p : path.join(ws, p);
-    const built = path.join(ws, path.basename(ws) + suffix);
-    return fs.existsSync(built) || suffix ? built : 'opp_run';
+  // Folder of the OMNeT++ project of a file: the nearest folder above it with
+  // a .project or .oppbuildspec file, as the IDE sees projects, or else its
+  // workspace folder. A workspace folder may hold several projects (samples/),
+  // and a file may be outside the workspace.
+  projectDir(file) {
+    for (let d = path.dirname(file); ; d = path.dirname(d)) {
+      if (fs.existsSync(path.join(d, '.oppbuildspec')) || fs.existsSync(path.join(d, '.project'))) return d;
+      if (path.dirname(d) === d) return this.workspaceDir(file);
+    }
+  }
+
+  // Folders that may hold the projects a project uses: the workspace folders
+  // and the folders next to them and to the project, as in an IDE workspace.
+  projectCandidates(ws) {
+    const folders = (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath);
+    const dirs = [...folders];
+    for (const parent of new Set([ws, ...folders].map((d) => path.dirname(d)))) {
+      try {
+        for (const e of fs.readdirSync(parent, { withFileTypes: true })) if (e.isDirectory()) dirs.push(path.join(parent, e.name));
+      } catch {
+        // unreadable folder
+      }
+    }
+    return dirs;
+  }
+
+  // Folders of the projects the project of `root` uses (its .project), each
+  // before the projects that use it.
+  references(root) {
+    const dir = this.projectDir(root);
+    return project.references(dir, this.projectCandidates(dir));
+  }
+
+  // What runs the simulation, in release or debug mode: {command, output}
+  // (see project.target), or the omnetppIni.run.program / debug.program
+  // setting.
+  target(root, debug = false) {
+    const p = setting(debug ? 'debug.program' : 'run.program', '');
+    if (p) {
+      const program = path.isAbsolute(p) ? p : path.join(this.workspaceDir(root), p);
+      return { command: [program], output: program };
+    }
+    return project.target(this.projectDir(root), debug, oppRun(debug));
+  }
+
+  // Parallel jobs of the build: omnetppIni.build.jobs, or the number of CPUs
+  // minus one, which leaves one for the editor.
+  jobs() {
+    return setting('build.jobs', 0) || Math.max(os.cpus().length - 1, 1);
+  }
+
+  // Command that builds the project of `root`, as {dir, command}, `dir` being
+  // the folder to run it from: the omnetppIni.run.buildCommand /
+  // debug.buildCommand setting, run from the workspace folder, with `${mode}`
+  // replaced by release or debug and `${jobs}` by the parallel jobs, or make
+  // or the .oppbuildspec, run from the project folder (see
+  // project.buildCommand). Null if there is no way to build it.
+  buildCommand(root, debug = false) {
+    const configured = setting(debug ? 'debug.buildCommand' : 'run.buildCommand', '');
+    if (configured) {
+      const command = configured.replace(/\$\{mode\}/g, debug ? 'debug' : 'release').replace(/\$\{jobs\}/g, String(this.jobs()));
+      return { dir: this.workspaceDir(root), command };
+    }
+    const dir = this.projectDir(root);
+    const command = project.buildCommand(dir, debug, this.jobs());
+    return command && { dir, command };
+  }
+
+  // Does `target` of the project in `dir` need building? Per
+  // omnetppIni.build.when: when it is missing, when it is missing or a file it
+  // is built from changed (the default), or always. In the `linked` folders
+  // (projects it uses, omnetppIni.build.watch), libraries count too. Changes
+  // count after the output was written and after the last successful build: a
+  // build with nothing to do does not touch the output.
+  needsBuild(dir, target, linked = []) {
+    if (!target.output) return false;
+    const when = setting('build.when', 'changed');
+    if (when === 'always' || !fs.existsSync(target.output)) return true;
+    if (when !== 'changed') return false;
+    const since = Math.max(fs.statSync(target.output).mtimeMs, this.context.workspaceState.get(`built:${target.output}`, 0));
+    return project.changedSince(dir, since) || linked.some((d) => project.changedSince(d, since, project.LINKED));
+  }
+
+  // Builds the simulation if it needs it, after the projects it uses (with
+  // their make or .oppbuildspec), in a single task; resolves to true when it
+  // can be run.
+  async ensureBuilt(root, target, debug) {
+    const dir = this.projectDir(root);
+    const refs = this.references(root);
+    const steps = [];
+    for (const ref of refs) {
+      const t = project.target(ref, debug, oppRun(debug));
+      const command = this.needsBuild(ref, t) && project.buildCommand(ref, debug, this.jobs());
+      if (command) steps.push({ dir: ref, command, output: t.output });
+    }
+    const linked = [...refs, ...setting('build.watch', []).map((d) => path.resolve(this.workspaceDir(root), d))];
+    if (steps.length || this.needsBuild(dir, target, linked)) {
+      const build = this.buildCommand(root, debug);
+      if (build) {
+        steps.push({ ...build, output: target.output });
+      } else if (target.output && !fs.existsSync(target.output)) {
+        vscode.window.showWarningMessage(`Simulation not built: ${vscode.workspace.asRelativePath(target.output)} (no Makefile or .oppbuildspec; set omnetppIni.${debug ? 'debug' : 'run'}.buildCommand)`);
+        return false;
+      }
+    }
+    if (!steps.length) return true;
+    const command = steps.map((s) => `(cd ${quote(s.dir)} && ${s.command})`).join(' && ');
+    if (!(await this.build(root, command, debug ? 'Build (debug)' : 'Build'))) return false;
+    for (const s of steps) {
+      if (!s.output) continue;
+      if (!fs.existsSync(s.output)) {
+        vscode.window.showErrorMessage(`The build did not produce ${vscode.workspace.asRelativePath(s.output)}`);
+        return false;
+      }
+      // The end of the build, not its start: the files the build writes
+      // (_m.cc files of .msg files, Makefiles…) are not changes
+      await this.context.workspaceState.update(`built:${s.output}`, Date.now());
+    }
+    return true;
   }
 
   // NED path for -n: the omnetppIni.nedPath setting, or the folders listed in
-  // the project's .nedfolders file (OMNeT++ project convention), or the
-  // workspace folder.
+  // the .nedfolders files (OMNeT++ project convention) of the project and of
+  // the projects it uses, or their folders.
   nedPath(root) {
-    const ws = this.workspaceDir(root);
     const configured = setting('nedPath', '');
-    let dirs;
-    if (configured) {
-      dirs = configured.split(path.delimiter);
-    } else {
-      try {
-        dirs = fs.readFileSync(path.join(ws, '.nedfolders'), 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-      } catch {
-        dirs = [];
-      }
-    }
-    if (!dirs.length) dirs = ['.'];
-    return dirs.map((d) => path.resolve(ws, d)).join(path.delimiter);
+    if (configured) return configured.split(path.delimiter).map((d) => path.resolve(this.workspaceDir(root), d)).join(path.delimiter);
+    const folders = (dir) => {
+      const listed = project.readList(dir, '.nedfolders');
+      return (listed.length ? listed : ['.']).map((d) => path.resolve(dir, d));
+    };
+    return [this.projectDir(root), ...this.references(root)].flatMap(folders).join(path.delimiter);
   }
 
-  execute(name, cwd, args) {
-    const env = omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined;
-    const terminal = vscode.window.createTerminal({ name, cwd, env });
+  // NED packages excluded with -x: the ones listed in the .nedexclusions files
+  // of the project and of the projects it uses, as [] or ['-x', list].
+  nedExclusions(root) {
+    const pkgs = [this.projectDir(root), ...this.references(root)].flatMap((d) => project.readList(d, '.nedexclusions'));
+    return pkgs.length ? ['-x', pkgs.join(';')] : [];
+  }
+
+  // Environment for terminals, build tasks and debug sessions: OMNET_ROOT and
+  // its bin folder in the PATH (makefiles call opp_makemake, opp_featuretool…),
+  // and with `root`, the folder of its project and of the projects it uses in
+  // <NAME>_ROOT, as their makefiles and scripts expect (INET_ROOT…).
+  shellEnv(root) {
+    const env = {};
+    if (omnetppRoot()) {
+      env.OMNET_ROOT = omnetppRoot();
+      env.PATH = `${path.join(omnetppRoot(), 'bin')}${path.delimiter}${process.env.PATH}`;
+    }
+    if (root) {
+      for (const d of [...this.references(root), this.projectDir(root)]) env[project.rootVariable(d)] = d;
+    }
+    return Object.keys(env).length ? env : undefined;
+  }
+
+  // `command` run in the environment of the OMNeT++ installation, set up by
+  // its setenv script: on macOS it also puts in the PATH the Homebrew tools
+  // it needs, such as GNU make (the makefiles need make 4).
+  withSetenv(command) {
+    const setenv = omnetppRoot() && path.join(omnetppRoot(), 'setenv');
+    if (!setenv || process.platform === 'win32' || !fs.existsSync(setenv)) return command;
+    return `bash -c ${quote(`. ${quote(setenv)} -q && ${command}`)}`;
+  }
+
+  // Runs `args` in a new terminal, with the environment of the project of
+  // `root`, and with `setenv` in the environment of the OMNeT++ installation.
+  execute(name, cwd, args, root, setenv = false) {
+    const terminal = vscode.window.createTerminal({ name, cwd, env: this.shellEnv(root) });
     terminal.show();
-    terminal.sendText(args.map(quote).join(' '));
+    const command = args.map(quote).join(' ');
+    terminal.sendText(this.shortCommand(name, setenv ? this.withSetenv(`exec ${command}`) : command));
+  }
+
+  // `command`, or if it is long, a command that runs it from a script. The
+  // terminal may get the text before the shell reads it, and the terminal
+  // driver cuts longer input lines (at 1024 bytes on macOS): the NED path and
+  // exclusions of a project that uses INET are longer.
+  shortCommand(name, command) {
+    if (command.length < 512) return command;
+    const dir = path.join(this.context.globalStorageUri ? this.context.globalStorageUri.fsPath : os.tmpdir(), 'commands');
+    const file = path.join(dir, `${name.replace(/[^\w.-]+/g, '_')}.sh`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, `#!/bin/sh\n# ${name}\n${command}\n`);
+    return `sh ${quote(file)}`;
   }
 
   // Asks which runs to execute: [] for run 0 (the default), ['-r', x] otherwise.
@@ -193,14 +346,17 @@ class Runner {
     if (script) {
       // Project script, run from the workspace folder: <script> [-r runs] [-Qt] <ini> <config>
       const args = [script, ...runs, ...(qtenv ? ['-Qt'] : []), ...extra, vscode.workspace.asRelativePath(root, false), config];
-      this.execute(name, this.workspaceDir(root), args);
+      this.execute(name, this.workspaceDir(root), args, root);
     } else {
-      // The simulation itself, run from the ini file's folder. Without -r,
-      // Cmdenv runs every run, so "run 0" ([] from pickRuns) needs -r 0.
+      // The simulation itself, run from the ini file's folder, built first if
+      // it is missing. Without -r, Cmdenv runs every run, so "run 0" ([] from
+      // pickRuns) needs -r 0.
+      const target = this.target(root);
+      if (!(await this.ensureBuilt(root, target, false))) return;
       const r = runs.length === 0 ? ['-r', '0'] : runs[1] === 'all' ? [] : runs;
-      const args = [this.program(root), '-u', qtenv ? 'Qtenv' : 'Cmdenv', '-c', config, ...r,
-        '-n', this.nedPath(root), ...extra, path.basename(root)];
-      this.execute(name, path.dirname(root), args);
+      const args = [...target.command, '-u', qtenv ? 'Qtenv' : 'Cmdenv', '-c', config, ...r,
+        '-n', this.nedPath(root), ...this.nedExclusions(root), ...extra, path.basename(root)];
+      this.execute(name, path.dirname(root), args, root, true);
     }
   }
 
@@ -230,15 +386,10 @@ class Runner {
     }
     const args = [script, ...build.args, ...runs,
       ...splitArgs(setting('cluster.extraArgs', '')), user, vscode.workspace.asRelativePath(root, false), configs.join(',')];
-    this.execute(`Cluster: ${configs.join(',')}`, this.workspaceDir(root), args);
+    this.execute(`Cluster: ${configs.join(',')}`, this.workspaceDir(root), args, root);
   }
 
   // ------------------------------------------------------------ debugging
-
-  // Debug executable: <workspace>/<project name>_dbg, as opp_makemake builds it with MODE=debug.
-  debugProgram(root) {
-    return this.program(root, '_dbg');
-  }
 
   // Debugger extension to use: 'lldb' (CodeLLDB) or 'cppdbg' (Microsoft C/C++).
   async debuggerType() {
@@ -256,12 +407,13 @@ class Runner {
     return undefined;
   }
 
-  // Runs the debug build command as a task and resolves to true if it succeeds.
-  buildDebug(root) {
+  // Runs a build command from the workspace folder as a task and resolves to
+  // true if it succeeds.
+  build(root, command, name) {
     const ws = this.workspaceDir(root);
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
-    const task = new vscode.Task({ type: 'shell', task: 'build-debug' }, folder || vscode.TaskScope.Workspace,
-      'Build (debug)', 'OMNeT++', new vscode.ShellExecution(setting('debug.buildCommand', 'make MODE=debug'), { cwd: ws, env: omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined }));
+    const task = new vscode.Task({ type: 'shell', task: name }, folder || vscode.TaskScope.Workspace,
+      name, 'OMNeT++', new vscode.ShellExecution(this.withSetenv(command), { cwd: ws, env: this.shellEnv(root) }));
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true };
     return new Promise((resolve) => {
       const done = vscode.tasks.onDidEndTaskProcess((e) => {
@@ -274,35 +426,44 @@ class Runner {
     });
   }
 
+  // Asks which run to debug, as the debugger runs a single process: its
+  // number, or undefined if cancelled. When the runs cannot be counted, the
+  // number is typed.
+  async pickDebugRun(root, config) {
+    const res = await this.countRuns(root, config);
+    if (res.runs === 1) return '0';
+    const items = [];
+    for (let i = 0; i < (res.runs || 0); i++) items.push({ label: `Run ${i}`, description: res.labels[i], run: String(i) });
+    items.push({ label: '$(edit) Other…', description: 'run number', custom: true });
+    const pick = await vscode.window.showQuickPick(items, {
+      title: `Debug ${config}${res.runs ? ` (${res.runs} runs)` : ''}`,
+      placeHolder: res.error ? `${res.error}: choose Other… to type the run` : 'Run to debug (type e.g. load=50 to filter)',
+      matchOnDescription: true,
+    });
+    if (!pick) return undefined;
+    if (!pick.custom) return pick.run;
+    const value = await vscode.window.showInputBox({
+      title: `Debug ${config}: run`, prompt: 'Run number', value: '0',
+      validateInput: (v) => (/^\d+$/.test(v.trim()) ? null : 'A run number'),
+    });
+    return value === undefined ? undefined : value.trim();
+  }
+
   async debug(file, config) {
     const root = await this.pickRoot(file);
     if (!root) return;
     const type = await this.debuggerType();
     if (!type) return;
-    const program = this.debugProgram(root);
-    if (!fs.existsSync(program)) {
-      const ok = await vscode.window.showWarningMessage(
-        `Debug executable not found: ${vscode.workspace.asRelativePath(program)}`, `Build it (${setting('debug.buildCommand', 'make MODE=debug')})`);
-      if (!ok || !(await this.buildDebug(root)) || !fs.existsSync(program)) return;
-    }
-    // A single run: the debugger runs one process
-    const res = await this.countRuns(root, config);
-    let run = '0';
-    if (res.runs > 1) {
-      const items = [];
-      for (let i = 0; i < res.runs; i++) items.push({ label: `Run ${i}`, description: res.labels[i], run: String(i) });
-      const pick = await vscode.window.showQuickPick(items, {
-        title: `Debug ${config} (${res.runs} runs)`, placeHolder: 'Run to debug (type e.g. load=50 to filter)', matchOnDescription: true,
-      });
-      if (!pick) return;
-      run = pick.run;
-    }
-    const args = ['-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', this.nedPath(root),
-      '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
-    const env = {};
+    // The run first, as Run does: the build may take long
+    const run = await this.pickDebugRun(root, config);
+    if (run === undefined) return;
+    const target = this.target(root, true);
+    if (!(await this.ensureBuilt(root, target, true))) return;
+    const [program, ...programArgs] = target.command;
+    const args = [...programArgs, '-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', this.nedPath(root),
+      ...this.nedExclusions(root), '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
+    const env = { ...this.shellEnv(root) };
     if (omnetppRoot()) {
-      env.OMNET_ROOT = omnetppRoot();
-      env.PATH = `${path.join(omnetppRoot(), 'bin')}:${process.env.PATH}`;
       env[process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'] = path.join(omnetppRoot(), 'lib');
     }
     const name = `Debug ${config} #${run}`;
