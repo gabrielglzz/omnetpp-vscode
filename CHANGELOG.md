@@ -11,6 +11,9 @@ Fixes found by running the extension on the ini files of INET 4.7:
 - Unknown configuration options are warnings, since simulation libraries can register their own options.
 - The language is shown as *OMNeT++ ini (Run & Debug)*.
 - Diagnostics are several times faster in large projects.
+- Run, Qtenv and Debug build the simulation first when it has not been built or its sources changed (`omnetppIni.build.when`, and `omnetppIni.build.watch` for the libraries it depends on); `${mode}` in the build commands is `release` or `debug`, and `${jobs}` the parallel jobs (`omnetppIni.build.jobs`, the number of CPUs minus one by default, also passed to make with `-j`). Builds: with `make MODE=release|debug`, or with the makemake folders of `.oppbuildspec` (generating their Makefiles if needed), or with `omnetppIni.run.buildCommand` / `debug.buildCommand`.
+- The executable or shared library to run is read from `.oppbuildspec`; libraries, such as INET, run with `opp_run -l` (`opp_run_dbg -l` when debugging). The NED packages of `.nedexclusions` are excluded with `-x`.
+- Builds and simulations run in the environment of the OMNeT++ `setenv` script (on macOS it provides the GNU make 4 of Homebrew that the makefiles need); terminals and build tasks also get its `bin` folder in the `PATH`.
 - Tests for the parser, the diagnostics and the completion (`test/run.js`).
 
 ## 0.8.0

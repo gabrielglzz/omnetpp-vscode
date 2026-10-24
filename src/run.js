@@ -6,6 +6,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { execFile } = require('child_process');
 const vscode = require('vscode');
 
@@ -24,9 +25,11 @@ function omnetppRoot() {
   return setting('omnetppRoot', '') || process.env.OMNET_ROOT || '';
 }
 
-function oppRun() {
+// opp_run, or opp_run_dbg for debug builds, from the OMNeT++ installation.
+function oppRun(debug = false) {
   const root = omnetppRoot();
-  return root ? path.join(root, 'bin', 'opp_run') : 'opp_run';
+  const name = debug ? 'opp_run_dbg' : 'opp_run';
+  return root ? path.join(root, 'bin', name) : name;
 }
 
 class Runner {
@@ -107,15 +110,104 @@ class Runner {
     return folder ? folder.uri.fsPath : path.dirname(file);
   }
 
-  // Simulation executable: the omnetppIni.run.program setting, or the
-  // executable opp_makemake builds (named after the project directory, with
-  // `suffix` for debug builds), or opp_run.
-  program(root, suffix = '') {
+  // What runs the simulation, in release or debug mode: {command, output},
+  // `command` being the program and its first arguments and `output` the file
+  // the build produces (null if there is nothing to build). It is the
+  // omnetppIni.run.program / debug.program setting, or the target of the
+  // project's .oppbuildspec (an executable, or a shared library loaded with
+  // opp_run -l), or the executable opp_makemake builds in the workspace folder
+  // (named after it), or opp_run. Debug builds have the _dbg suffix.
+  target(root, debug = false) {
     const ws = this.workspaceDir(root);
-    const p = setting(suffix ? 'debug.program' : 'run.program', '');
-    if (p) return path.isAbsolute(p) ? p : path.join(ws, p);
-    const built = path.join(ws, path.basename(ws) + suffix);
-    return fs.existsSync(built) || suffix ? built : 'opp_run';
+    const p = setting(debug ? 'debug.program' : 'run.program', '');
+    if (p) {
+      const program = path.isAbsolute(p) ? p : path.join(ws, p);
+      return { command: [program], output: program };
+    }
+    const d = debug ? '_dbg' : '';
+    const exeSuffix = process.platform === 'win32' ? '.exe' : '';
+    const target = buildSpecTarget(ws);
+    if (target && target.library) {
+      const lib = process.platform === 'win32' ? `${target.name}${d}.dll`
+        : `lib${target.name}${d}${process.platform === 'darwin' ? '.dylib' : '.so'}`;
+      return { command: [oppRun(debug), '-l', path.join(target.dir, target.name)], output: path.join(target.dir, lib) };
+    }
+    if (target) {
+      const exe = path.join(target.dir, target.name + d + exeSuffix);
+      return { command: [exe], output: exe };
+    }
+    const exe = path.join(ws, path.basename(ws) + d + exeSuffix);
+    if (debug || fs.existsSync(exe) || fs.existsSync(path.join(ws, 'Makefile'))) return { command: [exe], output: exe };
+    return { command: [oppRun()], output: null };
+  }
+
+  // Command that builds the simulation: the omnetppIni.run.buildCommand /
+  // debug.buildCommand setting, or `make MODE=release|debug` in the workspace
+  // folder if it has a Makefile, or else in each makemake folder of the
+  // .oppbuildspec, creating its Makefile with opp_makemake if it is missing.
+  // Null if there is no way to build it. `${mode}` in the setting is replaced
+  // by release or debug, and `${jobs}` by the number of parallel jobs
+  // (omnetppIni.build.jobs, or the number of CPUs minus one, which leaves one
+  // for the editor).
+  buildCommand(root, debug = false) {
+    const jobs = setting('build.jobs', 0) || Math.max(os.cpus().length - 1, 1);
+    const configured = setting(debug ? 'debug.buildCommand' : 'run.buildCommand', '');
+    if (configured) return configured.replace(/\$\{mode\}/g, debug ? 'debug' : 'release').replace(/\$\{jobs\}/g, String(jobs));
+    const ws = this.workspaceDir(root);
+    const make = `make -j${jobs} MODE=${debug ? 'debug' : 'release'}`;
+    if (fs.existsSync(path.join(ws, 'Makefile'))) return make;
+    // Subfolders first: the folders above may link what they build
+    const dirs = buildSpecDirs(ws).filter((d) => d.type === 'makemake').sort((a, b) => b.dir.length - a.dir.length);
+    if (!dirs.length) return null;
+    return dirs.map((d) => `(cd ${quote(d.dir)} && (test -f Makefile || opp_makemake ${makemakeArgs(d.options).map(quote).join(' ')}) && ${make})`).join(' && ');
+  }
+
+  // Does `target` need building? Per omnetppIni.build.when: when it is missing,
+  // when it is missing or a file it is built from changed (the default), or
+  // always. Changes count after the output was written and after the last
+  // successful build: a build with nothing to do does not touch the output.
+  needsBuild(root, target) {
+    if (!target.output) return false;
+    const when = setting('build.when', 'changed');
+    if (when === 'always' || !fs.existsSync(target.output)) return true;
+    if (when !== 'changed') return false;
+    const since = Math.max(fs.statSync(target.output).mtimeMs, this.context.workspaceState.get(`built:${target.output}`, 0));
+    return this.changedSince(root, since);
+  }
+
+  // Did a file the simulation is built from change after `since`? The sources
+  // and build files of the folders of the .oppbuildspec (or of the workspace
+  // folder), and the sources and libraries of the omnetppIni.build.watch
+  // folders (libraries the project depends on).
+  changedSince(root, since) {
+    const ws = this.workspaceDir(root);
+    if (newerFile(ws, since, SOURCES, false)) return true;
+    const dirs = buildSpecDirs(ws);
+    // A custom Makefile in the workspace folder: only its own files count
+    const scan = dirs.length ? dirs.filter((d) => d.dir !== ws || d.type === 'makemake').map((d) => d.dir) : [ws];
+    if (scan.some((d) => newerFile(d, since, SOURCES))) return true;
+    return setting('build.watch', []).some((d) => newerFile(path.resolve(ws, d), since, WATCHED));
+  }
+
+  // Builds the simulation if it needs it; resolves to true when it can be run.
+  async ensureBuilt(root, target, debug) {
+    if (!this.needsBuild(root, target)) return true;
+    const what = vscode.workspace.asRelativePath(target.output);
+    const command = this.buildCommand(root, debug);
+    if (!command) {
+      if (fs.existsSync(target.output)) return true;
+      vscode.window.showWarningMessage(`Simulation not built: ${what} (no Makefile or .oppbuildspec; set omnetppIni.${debug ? 'debug' : 'run'}.buildCommand)`);
+      return false;
+    }
+    if (!(await this.build(root, command, debug ? 'Build (debug)' : 'Build'))) return false;
+    if (!fs.existsSync(target.output)) {
+      vscode.window.showErrorMessage(`The build did not produce ${what}`);
+      return false;
+    }
+    // The end of the build, not its start: the files the build writes
+    // (_m.cc files of .msg files, Makefiles…) are not changes
+    await this.context.workspaceState.update(`built:${target.output}`, Date.now());
+    return true;
   }
 
   // NED path for -n: the omnetppIni.nedPath setting, or the folders listed in
@@ -138,11 +230,39 @@ class Runner {
     return dirs.map((d) => path.resolve(ws, d)).join(path.delimiter);
   }
 
-  execute(name, cwd, args) {
-    const env = omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined;
-    const terminal = vscode.window.createTerminal({ name, cwd, env });
+  // NED packages excluded with -x: the ones listed in the project's
+  // .nedexclusions file (OMNeT++ project convention), as [] or ['-x', list].
+  nedExclusions(root) {
+    let pkgs;
+    try {
+      pkgs = fs.readFileSync(path.join(this.workspaceDir(root), '.nedexclusions'), 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    } catch {
+      pkgs = [];
+    }
+    return pkgs.length ? ['-x', pkgs.join(';')] : [];
+  }
+
+  // Environment for terminals and build tasks: OMNET_ROOT, and its bin folder
+  // in the PATH (makefiles call opp_makemake, opp_featuretool…).
+  shellEnv() {
+    const root = omnetppRoot();
+    return root ? { OMNET_ROOT: root, PATH: `${path.join(root, 'bin')}${path.delimiter}${process.env.PATH}` } : undefined;
+  }
+
+  // `command` run in the environment of the OMNeT++ installation, set up by
+  // its setenv script: on macOS it also puts in the PATH the Homebrew tools
+  // it needs, such as GNU make (the makefiles need make 4).
+  withSetenv(command) {
+    const setenv = omnetppRoot() && path.join(omnetppRoot(), 'setenv');
+    if (!setenv || process.platform === 'win32' || !fs.existsSync(setenv)) return command;
+    return `bash -c ${quote(`. ${quote(setenv)} -q && ${command}`)}`;
+  }
+
+  execute(name, cwd, args, setenv = false) {
+    const terminal = vscode.window.createTerminal({ name, cwd, env: this.shellEnv() });
     terminal.show();
-    terminal.sendText(args.map(quote).join(' '));
+    const command = args.map(quote).join(' ');
+    terminal.sendText(setenv ? this.withSetenv(`exec ${command}`) : command);
   }
 
   // Asks which runs to execute: [] for run 0 (the default), ['-r', x] otherwise.
@@ -195,12 +315,15 @@ class Runner {
       const args = [script, ...runs, ...(qtenv ? ['-Qt'] : []), ...extra, vscode.workspace.asRelativePath(root, false), config];
       this.execute(name, this.workspaceDir(root), args);
     } else {
-      // The simulation itself, run from the ini file's folder. Without -r,
-      // Cmdenv runs every run, so "run 0" ([] from pickRuns) needs -r 0.
+      // The simulation itself, run from the ini file's folder, built first if
+      // it is missing. Without -r, Cmdenv runs every run, so "run 0" ([] from
+      // pickRuns) needs -r 0.
+      const target = this.target(root);
+      if (!(await this.ensureBuilt(root, target, false))) return;
       const r = runs.length === 0 ? ['-r', '0'] : runs[1] === 'all' ? [] : runs;
-      const args = [this.program(root), '-u', qtenv ? 'Qtenv' : 'Cmdenv', '-c', config, ...r,
-        '-n', this.nedPath(root), ...extra, path.basename(root)];
-      this.execute(name, path.dirname(root), args);
+      const args = [...target.command, '-u', qtenv ? 'Qtenv' : 'Cmdenv', '-c', config, ...r,
+        '-n', this.nedPath(root), ...this.nedExclusions(root), ...extra, path.basename(root)];
+      this.execute(name, path.dirname(root), args, true);
     }
   }
 
@@ -235,11 +358,6 @@ class Runner {
 
   // ------------------------------------------------------------ debugging
 
-  // Debug executable: <workspace>/<project name>_dbg, as opp_makemake builds it with MODE=debug.
-  debugProgram(root) {
-    return this.program(root, '_dbg');
-  }
-
   // Debugger extension to use: 'lldb' (CodeLLDB) or 'cppdbg' (Microsoft C/C++).
   async debuggerType() {
     const pref = setting('debug.debugger', 'auto');
@@ -256,12 +374,13 @@ class Runner {
     return undefined;
   }
 
-  // Runs the debug build command as a task and resolves to true if it succeeds.
-  buildDebug(root) {
+  // Runs a build command from the workspace folder as a task and resolves to
+  // true if it succeeds.
+  build(root, command, name) {
     const ws = this.workspaceDir(root);
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
-    const task = new vscode.Task({ type: 'shell', task: 'build-debug' }, folder || vscode.TaskScope.Workspace,
-      'Build (debug)', 'OMNeT++', new vscode.ShellExecution(setting('debug.buildCommand', 'make MODE=debug'), { cwd: ws, env: omnetppRoot() ? { OMNET_ROOT: omnetppRoot() } : undefined }));
+    const task = new vscode.Task({ type: 'shell', task: name }, folder || vscode.TaskScope.Workspace,
+      name, 'OMNeT++', new vscode.ShellExecution(this.withSetenv(command), { cwd: ws, env: this.shellEnv() }));
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true };
     return new Promise((resolve) => {
       const done = vscode.tasks.onDidEndTaskProcess((e) => {
@@ -279,12 +398,9 @@ class Runner {
     if (!root) return;
     const type = await this.debuggerType();
     if (!type) return;
-    const program = this.debugProgram(root);
-    if (!fs.existsSync(program)) {
-      const ok = await vscode.window.showWarningMessage(
-        `Debug executable not found: ${vscode.workspace.asRelativePath(program)}`, `Build it (${setting('debug.buildCommand', 'make MODE=debug')})`);
-      if (!ok || !(await this.buildDebug(root)) || !fs.existsSync(program)) return;
-    }
+    const target = this.target(root, true);
+    if (!(await this.ensureBuilt(root, target, true))) return;
+    const [program, ...programArgs] = target.command;
     // A single run: the debugger runs one process
     const res = await this.countRuns(root, config);
     let run = '0';
@@ -297,8 +413,8 @@ class Runner {
       if (!pick) return;
       run = pick.run;
     }
-    const args = ['-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', this.nedPath(root),
-      '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
+    const args = [...programArgs, '-r', run, '-m', '-u', setting('debug.userInterface', 'Cmdenv'), '-c', config, '-n', this.nedPath(root),
+      ...this.nedExclusions(root), '--debug-on-errors=true', ...splitArgs(setting('debug.extraArgs', '')), path.basename(root)];
     const env = {};
     if (omnetppRoot()) {
       env.OMNET_ROOT = omnetppRoot();
@@ -459,6 +575,72 @@ function parseRuns(stdout) {
 function varying(runs) {
   const names = Object.keys(runs[0] || {}).filter((n) => runs.some((r) => r[n] !== runs[0][n]));
   return { names, labels: runs.map((r) => names.map((n) => `${n}=${r[n]}`).join(', ')) };
+}
+
+// Folders of the project's .oppbuildspec (written by the OMNeT++ IDE):
+// [{dir, type, options}], type being 'makemake' (Makefile generated with
+// opp_makemake and `options`) or 'custom' (hand-written Makefile).
+function buildSpecDirs(ws) {
+  let spec;
+  try {
+    spec = fs.readFileSync(path.join(ws, '.oppbuildspec'), 'utf8');
+  } catch {
+    return [];
+  }
+  return [...spec.matchAll(/<dir\b([^>]*)>/g)].map((m) => {
+    const attr = (name) => (new RegExp(`\\b${name}="([^"]*)"`).exec(m[1]) || [])[1];
+    return { dir: path.join(ws, attr('path') || '.'), type: attr('type'), options: splitArgs(attr('makemake-options') || '') };
+  });
+}
+
+// Target of the first linked makemake folder of the .oppbuildspec:
+// {dir, name, library}, or null. opp_makemake names it after its folder
+// unless -o is given, and builds a shared library with --make-so (-s).
+function buildSpecTarget(ws) {
+  for (const { dir, type, options: opts } of buildSpecDirs(ws)) {
+    if (type !== 'makemake' || opts.includes('--nolink') || opts.includes('-a') || opts.includes('--make-lib')) continue;
+    const o = opts.findIndex((x) => x.startsWith('-o'));
+    const name = o < 0 ? path.basename(dir) : opts[o] === '-o' ? opts[o + 1] : opts[o].slice(2);
+    return { dir, name, library: opts.includes('--make-so') || opts.includes('-s') };
+  }
+  return null;
+}
+
+// Files the simulation is built from, and in the omnetppIni.build.watch
+// folders also the libraries the project links.
+const SOURCES = /\.(cc|cpp|cxx|c|h|hh|hpp|hxx|msg|sm)$|^(Makefile|makefrag|\.oppbuildspec|\.oppfeatures|\.oppfeaturestate)$/;
+const WATCHED = new RegExp(`${SOURCES.source}|\\.(so|dylib|dll|a|lib)$`);
+
+// Does `dir` (and its subfolders if `deep`) have a file matching `pattern`
+// modified after `since`? Skips the build output (out) and hidden folders.
+function newerFile(dir, since, pattern, deep = true) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const e of entries) {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (deep && e.name !== 'out' && !e.name.startsWith('.') && newerFile(f, since, pattern)) return true;
+    } else if (pattern.test(e.name)) {
+      try {
+        if (fs.statSync(f).mtimeMs > since) return true;
+      } catch {
+        // broken symbolic link
+      }
+    }
+  }
+  return false;
+}
+
+// opp_makemake arguments for the options of a makemake folder, as the IDE
+// passes them: with -f, and without the --meta: options, which only the IDE
+// understands.
+function makemakeArgs(options) {
+  const args = options.filter((o) => !o.startsWith('--meta:'));
+  return args.includes('-f') || args.includes('--force') ? args : ['-f', ...args];
 }
 
 function splitArgs(s) {

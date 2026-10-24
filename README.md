@@ -72,12 +72,16 @@ ln -s "$PWD" ~/.vscode/extensions/gabrielglzz.omnetpp-vscode
 | Setting | Default | Description |
 |---|---|---|
 | `omnetppIni.omnetppRoot` | `$OMNET_ROOT` | OMNeT++ installation |
-| `omnetppIni.run.program` | `<project>` or `opp_run` | Simulation executable |
+| `omnetppIni.run.program` | `.oppbuildspec`, `<project>` or `opp_run` | Simulation executable |
+| `omnetppIni.run.buildCommand` | `.oppbuildspec` | Builds the simulation (`${mode}`: `release`) |
+| `omnetppIni.build.when` | `changed` | Build before launching: `changed`, `missing` or `always` |
+| `omnetppIni.build.jobs` | CPUs − 1 | Parallel jobs (`make -j`, `${jobs}` in the build commands) |
+| `omnetppIni.build.watch` | | Folders of libraries the project depends on |
 | `omnetppIni.nedPath` | `.nedfolders` | NED path passed with `-n` |
 | `omnetppIni.run.extraArgs` | | Extra arguments for the simulation |
 | `omnetppIni.run.script` | | Project script to run configs instead of the executable |
-| `omnetppIni.debug.program` | `<project>_dbg` | Debug executable |
-| `omnetppIni.debug.buildCommand` | `make MODE=debug` | Builds the debug executable when it is missing |
+| `omnetppIni.debug.program` | `.oppbuildspec` or `<project>_dbg` | Debug executable |
+| `omnetppIni.debug.buildCommand` | `.oppbuildspec` | Builds the debug executable (`${mode}`: `debug`) |
 | `omnetppIni.debug.debugger` | `auto` | `lldb` (CodeLLDB) or `cppdbg` (C/C++) |
 | `omnetppIni.debug.userInterface` | `Cmdenv` | `Cmdenv` or `Qtenv` |
 | `omnetppIni.debug.extraArgs` | | Extra arguments in debug sessions |
@@ -85,6 +89,10 @@ ln -s "$PWD" ~/.vscode/extensions/gabrielglzz.omnetpp-vscode
 | `omnetppIni.cluster.user`, `cluster.extraArgs` | | Cluster username and extra options |
 | `omnetppIni.codeLens.enable` | `true` | Show the Run / Debug / Qtenv buttons |
 | `omnetppIni.diagnostics.unknownParameters` | `true` | Warn about keys that match no parameter |
+
+### Building
+
+Run, Qtenv and Debug build the simulation first when it has not been built, or when a file it is built from changed since the last build (`omnetppIni.build.when`): the C++ sources, headers, `.msg` and `.sm` files and build files of the project, and the sources and libraries of the `omnetppIni.build.watch` folders. What to build comes from the `.oppbuildspec` the OMNeT++ IDE writes: its first makemake folder that links gives the target, an executable or a shared library (`--make-so`, run with `opp_run -l`), and the build is `make -j<CPUs − 1> MODE=release` (or `MODE=debug`) in the project folder if it has a Makefile, or else in each makemake folder, generating its Makefile with `opp_makemake` and the folder's options if it is missing. The `--meta:` options are only understood by the IDE: projects that use other projects (`--meta:use-exported-libs`) need a Makefile of their own or `omnetppIni.run.buildCommand`. Without `.oppbuildspec`, the executable is the one `opp_makemake` builds in the project folder. Builds and simulations run in the environment set up by the `setenv` script of `omnetppIni.omnetppRoot`.
 
 ### Project scripts
 
@@ -94,7 +102,9 @@ Projects that launch simulations with their own scripts can configure them in th
 {
   "omnetppIni.run.script": "./run.sh",
   "omnetppIni.cluster.script": "./submit.sh",
-  "omnetppIni.debug.buildCommand": "./build.sh debug"
+  "omnetppIni.run.buildCommand": "./build.sh ${mode} -j${jobs}",
+  "omnetppIni.debug.buildCommand": "./build.sh ${mode} -j${jobs}",
+  "omnetppIni.build.watch": ["../inet/src", "../mylib"]
 }
 ```
 
