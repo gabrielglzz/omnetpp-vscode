@@ -2,7 +2,7 @@
   "name": "omnetpp-vscode",
   "displayName": "OMNeT++",
   "description": "OMNeT++ ini files: highlighting, completion of options, NED parameters, submodules and statistics, diagnostics, and running and debugging configs",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "gabrielglzz",
   "license": "MIT",
   "author": {
