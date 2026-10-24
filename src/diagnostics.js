@@ -40,7 +40,9 @@ function diagnose(file, index) {
     if (!key.includes('.') && !WILDCARDS.test(key)) {
       const o = options.lookup(key);
       if (!o) {
-        error(e, e.keyStart, e.keyEnd, `Unknown configuration option: ${key}`);
+        // Simulation libraries can register their own options from C++ (INET's
+        // unshare-namespaces...), which opp_run does not list: only a warning
+        warning(e, e.keyStart, e.keyEnd, `Unknown configuration option: ${key} (unless a simulation library registers it)`);
       } else if (o.scope === 'per-object') {
         error(e, e.keyStart, e.keyEnd, `Configuration option ${key} should be specified per object, try **.${key}=`);
       } else if (o.scope === 'global' && section !== null && section !== 'General') {
@@ -53,7 +55,9 @@ function diagnose(file, index) {
       const suffix = key.slice(dot + 1);
       if (dot >= 0 && suffix.includes('-')) {
         const o = options.lookup(suffix);
-        if (!o || o.scope !== 'per-object') {
+        if (!o) {
+          warning(e, e.keyStart + dot + 1, e.keyEnd, `Unknown per-object configuration option '${suffix}' in ${key} (unless a simulation library registers it)`);
+        } else if (o.scope !== 'per-object') {
           error(e, e.keyStart + dot + 1, e.keyEnd, `Unknown per-object configuration option '${suffix}' in ${key}`);
         }
       }

@@ -15,9 +15,9 @@ function isBlank(s) {
 }
 
 // Index where the content of a line ends: before a `#` comment that is not
-// inside a string constant. Returns {end, unterminated}.
-function contentEnd(text, from = 0) {
-  let inString = false;
+// inside a string constant. `inString` is true when the line continues a
+// string from the previous one. Returns {end, unterminated}.
+function contentEnd(text, from = 0, inString = false) {
   for (let i = from; i < text.length; i++) {
     const c = text[i];
     if (inString) {
@@ -96,12 +96,21 @@ function parse(text) {
   const sectionsInFile = new Set();
 
   for (const logical of joinLines(rawLines)) {
-    // Content of each physical segment, without comments and continuation backslashes
-    const segs = logical.segs.map((s) => {
-      const { end, unterminated } = contentEnd(s.text);
+    // Content of each physical segment, without comments and continuation backslashes.
+    // OMNeT++ joins backslash-continued lines before looking for strings and
+    // comments, so a string may go on in the next line and a comment hides the
+    // rest of the joined line. Indented continuation lines are checked one by one.
+    let inString = false;
+    let commented = false;
+    const segs = logical.segs.map((s, i) => {
+      if (!(i > 0 && logical.segs[i - 1].continued)) inString = commented = false;
+      if (commented) return { line: s.line, text: s.text, end: 0 };
+      const { end, unterminated } = contentEnd(s.text, 0, inString);
       let stop = end;
-      if (s.continued && end === s.text.length) stop--; // drop the backslash
-      if (unterminated) error(s.line, 0, s.text.length, 'Unterminated string constant');
+      if (end < s.text.length) commented = true;
+      else if (s.continued) stop--; // drop the backslash
+      inString = unterminated && s.continued;
+      if (unterminated && !s.continued) error(s.line, 0, s.text.length, 'Unterminated string constant');
       return { line: s.line, text: s.text, end: stop };
     });
     const first = segs[0];
@@ -166,18 +175,25 @@ function parse(text) {
       continue;
     }
 
-    // key = value
-    const eq = content.indexOf('=');
-    const keyRaw = eq < 0 ? '' : content.slice(col, eq);
-    const key = keyRaw.trim();
-    if (eq < 0 || !key) {
+    // key = value. OMNeT++ joins the lines first, so the key may go on in a
+    // continuation line (`**.radio. \` + `power = 1mW`) and `=` may start one.
+    const segText = (s, i) => s.text.slice(i ? 0 : col, s.end);
+    const eqSeg = segs.findIndex((s, i) => segText(s, i).includes('='));
+    const eqAt = eqSeg < 0 ? -1 : (eqSeg ? 0 : col) + segText(segs[eqSeg], eqSeg).indexOf('=');
+    const keyParts = eqSeg < 0 ? [] : segs.slice(0, eqSeg + 1).map((s, i) => {
+      const part = s.text.slice(i ? 0 : col, i === eqSeg ? eqAt : s.end);
+      return i && !logical.segs[i - 1].continued ? '\n' + part : part; // indented lines keep the line break
+    });
+    const key = keyParts.join('').trim();
+    if (eqSeg < 0 || !key) {
       error(first.line, col, content.trimEnd().length, 'Line must be in the form key=value');
       continue;
     }
     const keyStart = col;
-    const keyEnd = col + keyRaw.trimEnd().length;
-    const valueSegs = [{ line: first.line, start: eq + 1, text: first.text.slice(eq + 1, first.end) }];
-    for (const s of segs.slice(1)) valueSegs.push({ line: s.line, start: 0, text: s.text.slice(0, s.end) });
+    const keyEnd = col + keyParts[0].trimEnd().length;
+    const eqLine = segs[eqSeg];
+    const valueSegs = [{ line: eqLine.line, start: eqAt + 1, text: eqLine.text.slice(eqAt + 1, eqLine.end) }];
+    for (const s of segs.slice(eqSeg + 1)) valueSegs.push({ line: s.line, start: 0, text: s.text.slice(0, s.end) });
     const value = valueSegs.map((s) => s.text).join(' ').trim();
     const entry = { key, line: first.line, keyStart, keyEnd, section, value, valueSegs };
     doc.entries.push(entry);

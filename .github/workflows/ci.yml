@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 16: the Node of VS Code 1.80, the oldest version in engines.vscode
+        node: [16, 22]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Parser, diagnostics and completion
+        run: node test/run.js
+
+  package:
+    name: Build the .vsix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the JSON files
+        run: |
+          for f in package.json language-configuration.json syntaxes/*.json src/*.json; do
+            python3 -m json.tool "$f" > /dev/null || { echo "::error file=$f::invalid JSON"; exit 1; }
+          done
+      - name: Build
+        run: python3 package.py omnetpp-vscode.vsix
+      - name: Check the contents
+        run: |
+          python3 - <<'EOF'
+          import zipfile
+          names = set(zipfile.ZipFile('omnetpp-vscode.vsix').namelist())
+          required = ['extension.vsixmanifest', 'extension/package.json', 'extension/src/extension.js',
+                      'extension/src/options-fallback.json', 'extension/syntaxes/omnetpp-ini.tmLanguage.json']
+          missing = [n for n in required if n not in names]
+          tests = [n for n in names if n.startswith('extension/test/')]
+          assert not missing, f'missing from the .vsix: {missing}'
+          assert not tests, f'tests in the .vsix: {tests}'
+          print(f'{len(names)} files')
+          EOF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: omnetpp-vscode-vsix
+          path: omnetpp-vscode.vsix
+          retention-days: 14

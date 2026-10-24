@@ -91,19 +91,21 @@ function moduleName(seg) {
   return m ? m[1] : null;
 }
 
-// Types of the networks the file is run with (the `network` of the
-// top-level ini files that load it).
-function networkTypes(file) {
+// Types of the networks a section of the file is run with: the first `network`
+// in its fallback chain (the section, the ones it extends, then [General]),
+// in each top-level ini file that loads it. `where` is {file, section}.
+function networkTypes({ file, section }) {
   const names = new Set();
-  for (const root of index.roots(file)) {
-    for (const f of index.descendants(root)) {
+  for (const { root, chain } of index.chains(section || 'General', file)) {
+    const entries = [...index.descendants(root)].flatMap((f) => {
       const e = index.get(f);
-      if (!e) continue;
-      for (const en of e.doc.entries) {
-        if (en.key === 'network' && (en.section === null || en.section === 'General')) {
-          for (const n of ned.findNetwork(en.value)) names.add(n.name);
-        }
-      }
+      return e ? e.doc.entries.filter((en) => en.key === 'network') : [];
+    });
+    for (const s of chain) {
+      const en = entries.find((x) => (x.section || 'General') === s);
+      if (!en) continue;
+      for (const n of ned.findNetwork(en.value, path.dirname(root))) names.add(n.qualified);
+      break;
     }
   }
   return [...names];
@@ -114,10 +116,11 @@ const ROOT = 'root'; // before the first segment: the only child is the network
 // Resolves key segments to the module types they may match, starting from the
 // network: `**` matches any depth, `SW[*]` the submodules called SW of the
 // current types. Returns an array of type names, ROOT, or null when unknown.
-function resolvePath(segs, file) {
+// Unless `strict`, a submodule not found from the path is searched by name.
+function resolvePath(segs, where, strict = false) {
   let cur = ROOT;
   const nets = () => {
-    const n = networkTypes(file);
+    const n = networkTypes(where);
     return n.length ? n : null;
   };
   for (const { text } of segs) {
@@ -127,12 +130,12 @@ function resolvePath(segs, file) {
       cur = from ? ned.closure(from) : null;
     } else if (name) {
       if (cur === ROOT) {
-        const n = ned.findNetwork(name);
-        cur = n.length ? n.map((t) => t.name) : null;
+        const n = ned.findNetwork(name, path.dirname(where.file));
+        cur = n.length ? n.map((t) => t.qualified) : null;
         continue;
       }
       let types = cur ? cur.flatMap((t) => ned.children(t)).filter((c) => c.name === name).flatMap((c) => c.types) : [];
-      if (!types.length) types = ned.submoduleTypes(name); // not found from the path: search by name
+      if (!types.length && !strict) types = ned.submoduleTypes(name); // not found from the path: search by name
       cur = types.length ? [...new Set(types)] : null;
     } else if (cur === ROOT) {
       cur = nets(); // `*` or another pattern matching the network name
@@ -145,8 +148,8 @@ function resolvePath(segs, file) {
 }
 
 // Submodules that can follow the key segments: Map(name => {vector, types}).
-function submodulesForPath(segs, file) {
-  const types = resolvePath(segs, file);
+function submodulesForPath(segs, where) {
+  const types = resolvePath(segs, where);
   const list = types ? types.flatMap((t) => ned.children(t)) : ned.allChildren();
   const byName = new Map();
   for (const c of list) {
@@ -159,8 +162,8 @@ function submodulesForPath(segs, file) {
 }
 
 // Statistics that can follow the key segments: Map(keyName => [stat]).
-function statsForPath(segs, file) {
-  const types = resolvePath(segs, file);
+function statsForPath(segs, where) {
+  const types = resolvePath(segs, where);
   const byName = new Map();
   for (const st of types ? types.flatMap((t) => ned.statsOf(t)) : ned.allStats()) {
     const k = keyName(st, ned);
@@ -172,8 +175,8 @@ function statsForPath(segs, file) {
 
 // Statistics called `name` that follow the given key segments: resolved
 // through the module path when possible, otherwise searched by name.
-function statsNamed(name, before, file) {
-  const { byName, resolved } = statsForPath(before, file);
+function statsNamed(name, before, where) {
+  const { byName, resolved } = statsForPath(before, where);
   if (resolved && byName.has(name)) return byName.get(name);
   return ned.findStats(name);
 }
@@ -181,15 +184,15 @@ function statsNamed(name, before, file) {
 // Parameters that can follow the key segments: Map(name => [param]). The
 // assignments in the body of the submodule matched by the last segment
 // (e.g. `host[..]: Host { numApps = 2; }`) fix those parameters.
-function paramsForPath(segs, file) {
-  const types = resolvePath(segs, file);
+function paramsForPath(segs, where, strict = false) {
+  const types = resolvePath(segs, where, strict);
   const byName = new Map();
   const add = (p) => {
     if (!byName.has(p.name)) byName.set(p.name, []);
     byName.get(p.name).push(p);
   };
   const last = segs.length ? moduleName(segs[segs.length - 1].text) : null;
-  const decls = last ? submodulesDecls(segs.slice(0, -1), last, file) : [];
+  const decls = last ? submodulesDecls(segs.slice(0, -1), last, where, strict) : [];
   for (const t of types || ned.allTypeNames()) {
     for (const p of ned.paramsOf(t)) {
       const decl = decls.find((d) => d.types.includes(t));
@@ -201,8 +204,8 @@ function paramsForPath(segs, file) {
 }
 
 // Declarations of the submodule `name` that can follow the key segments.
-function submodulesDecls(segs, name, file) {
-  const types = resolvePath(segs, file);
+function submodulesDecls(segs, name, where, strict = false) {
+  const types = resolvePath(segs, where, strict);
   return types ? types.flatMap((t) => ned.children(t)).filter((c) => c.name === name) : [];
 }
 
@@ -286,20 +289,32 @@ function nedDiagnostics(file, doc, checkUnknown = true) {
     const last = segs[segs.length - 1];
     if (!/^[A-Za-z_]\w*$/.test(last.text) || last.text === 'typename' || options.lookup(last.text)) continue;
     const before = segs.slice(0, -1);
-    const { byName, resolved } = paramsForPath(before, file);
-    if (!resolved) continue;
+    const where = { file, section: e.section };
     const pos = { line: e.line, start: e.keyStart + last.start, end: e.keyStart + last.start + last.text.length };
+    // `**.rt = ${rt="FA"}` is the usual idiom to define an iteration variable
+    // (it names the runs and result files), not a mistake
+    const mayBeUnknown = () => checkUnknown && !doc.varDefs.some((d) => d.entry === e) && !BUILTIN_PARAMS.has(last.text);
+    const { byName, resolved } = paramsForPath(before, where, true);
+    if (!resolved) {
+      // The network is unknown or the path leaves it (modules created from C++,
+      // ini files passed with -f...): only report names no NED type declares
+      if (mayBeUnknown() && paramsForPath(before, where).resolved && !ned.declaresParam(last.text) && !ned.findStats(last.text).length) {
+        out.push({ ...pos, severity: 'warning', message: `No parameter '${last.text}' in any NED type` });
+      }
+      continue;
+    }
     const list = byName.get(last.text);
     if (!list) {
-      // `**.rt = ${rt="FA"}` is the usual idiom to define an iteration variable
-      // (it names the runs and result files), not a mistake
-      const definesVariable = doc.varDefs.some((d) => d.entry === e);
-      if (checkUnknown && !definesVariable && !BUILTIN_PARAMS.has(last.text) && !statsForPath(before, file).byName.has(last.text)) {
+      // A key ending in `**.name` may also reach modules that C++ code creates
+      // at run time (INET's RtpProfile...), so a name declared by some NED
+      // type is not reported
+      const deep = before.length > 0 && before[before.length - 1].text.endsWith('**');
+      if (mayBeUnknown() && !(deep && ned.declaresParam(last.text)) && !statsForPath(before, where).byName.has(last.text)) {
         out.push({ ...pos, severity: 'warning', message: `No parameter '${last.text}' in the modules matched by '${before.map((g) => g.text).join('.')}'` });
       }
     } else if (list.every((p) => p.fixed)) {
-      const where = [...new Set(list.map((p) => p.assignedIn || p.declaredIn))].join(', ');
-      out.push({ ...pos, severity: 'warning', message: `Parameter '${last.text}' is set in NED (${where}) without default(): this value is ignored` });
+      const setIn = [...new Set(list.map((p) => p.assignedIn || p.declaredIn))].join(', ');
+      out.push({ ...pos, severity: 'warning', message: `Parameter '${last.text}' is set in NED (${setIn}) without default(): this value is ignored` });
     }
   }
   return out;
@@ -346,6 +361,7 @@ function complete(document, position) {
   const doc = docOf(document);
   const prefix = document.lineAt(position.line).text.slice(0, position.character);
   const section = sectionAtLine(doc, position.line) || (index.isRoot(file) ? 'General' : null);
+  const where = { file, section };
   let m;
 
   // ${...: predefined and iteration variables
@@ -400,11 +416,11 @@ function complete(document, position) {
       const before = segs.slice(0, -1);
       const range = wordRange(position, prefix, /[\w*-]*$/);
       const prev = before.length ? before[before.length - 1].text : '';
-      const afterStat = before.length > 0 && statsNamed(prev, before.slice(0, -1), file).length > 0 &&
-        !submodulesForPath(before.slice(0, -1), file).byName.has(moduleName(prev));
+      const afterStat = before.length > 0 && statsNamed(prev, before.slice(0, -1), where).length > 0 &&
+        !submodulesForPath(before.slice(0, -1), where).byName.has(moduleName(prev));
       const items = [];
       if (!afterStat) {
-        const subs = submodulesForPath(before, file);
+        const subs = submodulesForPath(before, where);
         for (const [name, { vector, types }] of subs.byName) {
           const label = vector ? `${name}[*]` : name;
           const i = item(label, vscode.CompletionItemKind.Module, [...types].join(', '), `Submodule **${label}**: ${typeLinks([...types])}`);
@@ -415,7 +431,7 @@ function complete(document, position) {
           i.command = { command: 'editor.action.triggerSuggest', title: '' };
           items.push(i);
         }
-        const params = paramsForPath(before, file);
+        const params = paramsForPath(before, where);
         for (const [name, list] of params.byName) {
           const fixed = list.every((x) => x.fixed);
           const i = item(name, vscode.CompletionItemKind.Field, paramSignature(list[0]), paramMarkdown(list));
@@ -425,7 +441,7 @@ function complete(document, position) {
           i.insertText = `${name} = `;
           items.push(i);
         }
-        const { byName, resolved } = statsForPath(before, file);
+        const { byName, resolved } = statsForPath(before, where);
         for (const [k, list] of byName) {
           const types = [...new Set(list.map((s) => s.type))].join(', ');
           const i = item(k, vscode.CompletionItemKind.Event, `statistic of ${types}`, statMarkdown(list));
@@ -487,8 +503,8 @@ function complete(document, position) {
   if (o && o.name === 'typename' && segs.length > 1) {
     const before = segs.slice(0, -1);
     const last = moduleName(before[before.length - 1].text);
-    const decls = last ? submodulesDecls(before.slice(0, -1), last, file) : [];
-    const types = decls.length ? [...new Set(decls.flatMap((d) => d.types))] : resolvePath(before, file) || [];
+    const decls = last ? submodulesDecls(before.slice(0, -1), last, where) : [];
+    const types = decls.length ? [...new Set(decls.flatMap((d) => d.types))] : resolvePath(before, where) || [];
     const r = wordRange(position, prefix, /"?[\w.]*"?$/);
     return types.map((t) => {
       const ty = ned.type(t);
@@ -500,7 +516,7 @@ function complete(document, position) {
     });
   }
   if (!o && segs.length > 1) {
-    const { byName } = paramsForPath(segs.slice(0, -1), file);
+    const { byName } = paramsForPath(segs.slice(0, -1), where);
     const list = byName.get(segs[segs.length - 1].text);
     if (list) {
       const items = [];
@@ -522,7 +538,7 @@ function complete(document, position) {
   }
   if (o && o.name === 'result-recording-modes') {
     const r = wordRange(position, prefix, /[+-]?\w*$/);
-    const stats = segs.length > 1 ? statsNamed(segs[segs.length - 2].text, segs.slice(0, -2), file) : [];
+    const stats = segs.length > 1 ? statsNamed(segs[segs.length - 2].text, segs.slice(0, -2), where) : [];
     const items = [];
     const seen = new Set();
     for (const st of stats) {
@@ -591,10 +607,11 @@ function hover(document, position) {
       const at = keySegmentAt(it, position.character);
       if (!at) break;
       const { seg, idx, segs, range } = at;
+      const where = { file, section: it.section };
       const o = idx === segs.length - 1 ? optionOfKey(it.key) : undefined;
       const name = moduleName(seg.text);
-      const sub = name && submodulesForPath(segs.slice(0, idx), file).byName.get(name);
-      const stats = sub ? [] : statsNamed(seg.text, segs.slice(0, idx), file);
+      const sub = name && submodulesForPath(segs.slice(0, idx), where).byName.get(name);
+      const stats = sub ? [] : statsNamed(seg.text, segs.slice(0, idx), where);
       if (o) {
         text = options.optionMarkdown(o);
       } else if (sub) {
@@ -602,7 +619,7 @@ function hover(document, position) {
       } else if (stats.length) {
         text = statMarkdown(stats);
       } else if (idx === segs.length - 1) {
-        const list = paramsForPath(segs.slice(0, -1), file).byName.get(seg.text);
+        const list = paramsForPath(segs.slice(0, -1), where).byName.get(seg.text);
         if (list) text = paramMarkdown(list);
       }
       if (text && !o) return new vscode.Hover(md(text), range);
@@ -632,7 +649,7 @@ function hover(document, position) {
       break;
     }
     case 'network': {
-      const list = ned.findNetwork(it.name);
+      const list = ned.findNetwork(it.name, path.dirname(file));
       text = list.length
         ? list.map((n) => `**network ${n.qualified}** — ${link(n.file, n.line)}`).join('  \n')
         : '*Network not found in the workspace NED files*';
@@ -661,16 +678,17 @@ function definition(document, position) {
     case 'varDef':
       return index.findVarDefs(it.name, file).map(({ file: f, item: d }) => locationOf(f, d));
     case 'network':
-      return ned.findNetwork(it.name).map((n) => locationOf(n.file, n));
+      return ned.findNetwork(it.name, path.dirname(file)).map((n) => locationOf(n.file, n));
     case 'key': {
       const at = keySegmentAt(it, position.character);
       if (!at) return undefined;
+      const where = { file, section: it.section };
       const name = moduleName(at.seg.text);
-      const sub = name && submodulesForPath(at.segs.slice(0, at.idx), file).byName.get(name);
+      const sub = name && submodulesForPath(at.segs.slice(0, at.idx), where).byName.get(name);
       if (sub) return [...sub.types].map((t) => ned.type(t)).filter(Boolean).map((t) => locationOf(t.file, t));
-      const stats = statsNamed(at.seg.text, at.segs.slice(0, at.idx), file);
+      const stats = statsNamed(at.seg.text, at.segs.slice(0, at.idx), where);
       if (stats.length) return stats.map((st) => locationOf(ned.type(st.type).file, st));
-      const list = paramsForPath(at.segs.slice(0, at.idx), file).byName.get(at.seg.text) || [];
+      const list = paramsForPath(at.segs.slice(0, at.idx), where).byName.get(at.seg.text) || [];
       const seen = new Set();
       return list.filter((p) => !seen.has(`${p.file}:${p.line}`) && seen.add(`${p.file}:${p.line}`)).map((p) => locationOf(p.file, p));
     }
