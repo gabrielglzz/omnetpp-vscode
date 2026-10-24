@@ -23,8 +23,8 @@ jobs:
         # 16: the Node of VS Code 1.80, the oldest version in engines.vscode
         node: [16, 22]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - name: Parser, diagnostics and completion
@@ -34,7 +34,7 @@ jobs:
     name: Build the .vsix
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the JSON files
         run: |
           for f in package.json language-configuration.json syntaxes/*.json src/*.json; do
@@ -55,7 +55,7 @@ jobs:
           assert not tests, f'tests in the .vsix: {tests}'
           print(f'{len(names)} files')
           EOF
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: omnetpp-vscode-vsix
           path: omnetpp-vscode.vsix
