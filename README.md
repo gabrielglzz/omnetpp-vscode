@@ -58,7 +58,7 @@ or use *Extensions: Install from VSIX…* in VS Code. To work on the extension, 
 ln -s "$PWD" ~/.vscode/extensions/gabrielglzz.omnetpp-vscode
 ```
 
-`omnetpp.ini` files always open as *OMNeT++ INI*. If other `.ini` files open with the built-in *Ini* language (see the status bar), add this to your settings:
+`omnetpp.ini` files always open as *OMNeT++ ini (Run & Debug)*. If other `.ini` files open with the built-in *Ini* language (see the status bar), add this to your settings:
 
 ```json
 "files.associations": { "*.ini": "omnetpp-ini" }

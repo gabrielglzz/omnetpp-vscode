@@ -39,7 +39,7 @@
       {
         "id": "omnetpp-ini",
         "aliases": [
-          "OMNeT++ INI",
+          "OMNeT++ ini (Run & Debug)",
           "omnetpp-ini"
         ],
         "extensions": [
