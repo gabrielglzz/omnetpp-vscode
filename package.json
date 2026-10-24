@@ -161,7 +161,7 @@
           "type": "array",
           "items": { "type": "string" },
           "default": [],
-          "description": "Folders of other libraries the project depends on (relative to the workspace folder, or absolute): a change in their sources or libraries also rebuilds the simulation."
+          "description": "Folders of other libraries the project depends on (relative to the workspace folder, or absolute): a change in their sources or libraries also rebuilds the simulation. The projects in the Project References of .project are watched without being listed here."
         },
         "omnetppIni.run.buildCommand": {
           "type": "string",
