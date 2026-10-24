@@ -24,8 +24,9 @@ Support for [OMNeT++](https://omnetpp.org) `.ini` files in Visual Studio Code: h
 - **Find References** (`Shift+F12`) for configs and variables.
 
 ### Diagnostics
-- **Errors** for the checks OMNeT++ makes when it loads an ini file: `;` comments, indented lines (indentation means line continuation), invalid or duplicate sections, unknown or misplaced options, `No such config` in `extends`, cycles in the fallback chain, missing or circular includes.
+- **Errors** for the checks OMNeT++ makes when it loads an ini file: `;` comments, indented lines (indentation means line continuation), invalid or duplicate sections, misplaced options, `No such config` in `extends`, cycles in the fallback chain, missing or circular includes.
 - **Warnings** for keys that silently do nothing: parameters that NED sets without `default()`, and keys that match no parameter of the modules they address (typos, leftovers…). Keys that just define an iteration variable (`**.label = ${label="A"}`) are not reported. The second check can be disabled with `omnetppIni.diagnostics.unknownParameters`.
+- Warnings for unknown options. They are not errors because simulation libraries can register their own options from C++ (INET's `unshare-namespaces`…), which `opp_run` does not list.
 - Undefined `${variables}`.
 
 Ini fragments included from several files are analysed through the files that include them: a fragment sees the configs, variables and network of every `omnetpp.ini` that includes it.
@@ -97,8 +98,10 @@ Projects that launch simulations with their own scripts can configure them in th
 
 ## Limitations
 
-- NED files are scanned, not fully parsed: types, parameters, submodules, `extends` / `like` and statistics are read with a lightweight parser. When a module path cannot be resolved from the network, submodules are looked up by name.
+- NED files are scanned, not fully parsed: types, parameters, submodules, `extends` / `like` and statistics are read with a lightweight parser. When a module path cannot be resolved from the network, submodules are looked up by name, and diagnostics only report the parameters that no NED type declares.
 - Built-in NED types of OMNeT++ (`ned.DatarateChannel`…) are not indexed.
+- `typename` keys of the ini file are not used to resolve paths: after a submodule declared with `like`, completion offers the parameters of every implementation of the interface.
+- Modules created from C++ at run time are not known. A key that ends in `**.name` is therefore only reported when no NED type declares `name`.
 
 ## Development
 
@@ -106,10 +109,13 @@ Projects that launch simulations with their own scripts can configure them in th
 
 ```bash
 CODE="/Applications/Visual Studio Code.app/Contents/MacOS/Code"   # or `code` on Linux
+ELECTRON_RUN_AS_NODE=1 "$CODE" test/run.js                       # tests: parser, diagnostics, completion
 ELECTRON_RUN_AS_NODE=1 "$CODE" test/tokenize.js test/sample.ini   # grammar scopes of each token
 ELECTRON_RUN_AS_NODE=1 "$CODE" test/diagnose.js <project dir>     # diagnostics of every ini file
 python3 package.py                                               # build the .vsix
 ```
+
+The tests activate the extension on `test/fixtures/project` with a stub of the `vscode` module. The expected diagnostics are written in its ini files as `# expect warning: <part of the message>` comments on their line.
 
 ## License and disclaimer
 

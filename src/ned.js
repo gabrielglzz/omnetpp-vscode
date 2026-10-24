@@ -3,6 +3,8 @@
 // Not a full NED parser, just enough to complete ini keys. No `vscode` dependency.
 'use strict';
 
+const path = require('path');
+
 const TYPE_RE = /\b(simple|module|network|channel|moduleinterface|channelinterface)\s+([A-Za-z_]\w*)((?:\s+(?:extends|like)\s+[\w.]+(?:\s*,\s*[\w.]+)*)*)\s*\{/g;
 const PROPERTY_RE = /@(statistic|statisticTemplate|signal)\s*\[\s*([^\]]+?)\s*\]\s*\(/g;
 const SUBMODULE_RE = /(?:^|[;}\s])([A-Za-z_]\w*)\s*(\[[^\]]*\])?\s*:\s*(?:<([^>]*)>\s*like\s+([\w.]+)|([\w.]+))(?:\s+if\s+[^{;]*)?\s*[{;]/g;
@@ -96,7 +98,9 @@ function statements(text, base) {
 }
 
 const PARAM_TYPES = 'double|int|bool|string|xml|object';
-const PROPS = '((?:@\\w+(?:\\([^)]*\\))?\\s*)*)';
+// Properties such as @unit(s) or @enum("g(erp)", "5 GHz (20 MHz)"): their
+// arguments may hold strings and one level of parentheses
+const PROPS = '((?:@\\w+(?:\\((?:"(?:[^"\\\\]|\\\\.)*"|\\([^()]*\\)|[^()"])*\\))?\\s*)*)';
 const DECL_RE = new RegExp(`^(\\s*(?:volatile\\s+)?(${PARAM_TYPES})\\s+)([A-Za-z_]\\w*)\\s*${PROPS}(?:=\\s*([\\s\\S]*?))?\\s*$`);
 const ASSIGN_RE = new RegExp(`^(\\s*)([A-Za-z_]\\w*)\\s*${PROPS}=\\s*([\\s\\S]*?)\\s*$`);
 
@@ -177,7 +181,8 @@ function parseNed(text) {
     const open = m.index + m[0].length - 1;
     const close = matching(clean, open, '{', '}');
     const heritage = m[3] || '';
-    const ext = /extends\s+([\w.]+)/.exec(heritage);
+    const ext = /extends\s+([\w.]+(?:\s*,\s*[\w.]+)*)/.exec(heritage);
+    const bases = ext ? ext[1].split(',').map((s) => s.trim().split('.').pop()) : [];
     const like = /like\s+([\w.]+(?:\s*,\s*[\w.]+)*)/.exec(heritage);
     const nameOffset = m.index + m[0].indexOf(m[2], m[1].length);
     const p = posOf(nameOffset);
@@ -188,8 +193,10 @@ function parseNed(text) {
       line: p.line,
       start: p.character,
       end: p.character + m[2].length,
-      extends: ext ? ext[1].split('.').pop() : null,
+      extends: bases.length ? bases[0] : null,
+      bases, // interfaces can extend several interfaces
       like: like ? like[1].split(',').map((s) => s.trim().split('.').pop()) : [],
+      headerStart: m.index,
       bodyStart: open + 1,
       bodyEnd: close < 0 ? clean.length : close,
       stats: [],
@@ -227,8 +234,21 @@ function parseNed(text) {
     }
   }
 
+  // Body of a type with the types nested in its `types:` section blanked out
+  // (same length, so offsets still match `clean`)
+  const ownBody = (t) => {
+    let body = clean.slice(t.bodyStart, t.bodyEnd);
+    for (const n of types) {
+      if (n === t || n.headerStart < t.bodyStart || n.bodyEnd > t.bodyEnd) continue;
+      const from = n.headerStart - t.bodyStart;
+      const to = Math.min(n.bodyEnd + 1, t.bodyEnd) - t.bodyStart;
+      body = body.slice(0, from) + ' '.repeat(to - from) + body.slice(to);
+    }
+    return body;
+  };
+
   for (const t of types) {
-    const body = clean.slice(t.bodyStart, t.bodyEnd);
+    const body = ownBody(t);
     const { decls, assigns } = parseParams(clean, t.bodyStart, t.bodyStart + paramsEnd(body), posOf, docOf);
     t.params = decls;
     t.assigns = assigns;
@@ -236,7 +256,7 @@ function parseNed(text) {
 
   // Submodules: only in the `submodules:` section of each type (up to `connections:`)
   for (const t of types) {
-    const body = clean.slice(t.bodyStart, t.bodyEnd);
+    const body = ownBody(t);
     const sm = /\bsubmodules\s*:/.exec(body);
     if (!sm) continue;
     const from = sm.index + sm[0].length;
@@ -273,7 +293,7 @@ function parseNed(text) {
     }
   }
 
-  for (const t of types) { delete t.bodyStart; delete t.bodyEnd; }
+  for (const t of types) { delete t.headerStart; delete t.bodyStart; delete t.bodyEnd; }
   return { package: pkg ? pkg[1] : null, types };
 }
 
@@ -296,6 +316,7 @@ class NedIndex {
   build() {
     if (this.cache) return this.cache;
     const types = new Map();        // simple name => [type (with file)]
+    const qualified = new Map();    // qualified name => type
     const impls = new Map();        // interface name => Set(type name)
     const submodules = new Map();   // submodule name => Set(type name)
     for (const [file, ned] of this.files) {
@@ -303,57 +324,93 @@ class NedIndex {
         const typed = { ...t, file };
         if (!types.has(t.name)) types.set(t.name, []);
         types.get(t.name).push(typed);
+        qualified.set(t.qualified, typed);
         for (const i of t.like) {
           if (!impls.has(i)) impls.set(i, new Set());
           impls.get(i).add(t.name);
         }
       }
     }
-    // Types derived (through `extends`) from an implementation also implement the interface
+    // Types derived (through `extends`) from an implementation also implement
+    // the interface, and implementations of an interface also implement the
+    // interfaces it extends (`moduleinterface IGptp extends IApp`)
     let grew = true;
     while (grew) {
       grew = false;
       for (const list of types.values()) {
         for (const t of list) {
           if (!t.extends) continue;
+          if (t.kind.endsWith('interface')) {
+            const own = impls.get(t.name);
+            if (!own) continue;
+            for (const b of t.bases) {
+              if (!impls.has(b)) impls.set(b, new Set());
+              const set = impls.get(b);
+              for (const i of own) if (!set.has(i)) { set.add(i); grew = true; }
+            }
+            continue;
+          }
           for (const set of impls.values()) {
             if (set.has(t.extends) && !set.has(t.name)) { set.add(t.name); grew = true; }
           }
         }
       }
     }
-    this.cache = { types, impls, submodules };
+    this.cache = { types, qualified, impls, submodules };
     for (const list of types.values()) {
       for (const t of list) {
         for (const s of t.submodules) {
           if (!submodules.has(s.name)) submodules.set(s.name, new Set());
-          for (const ty of this.typesOfSubmodule(s)) submodules.get(s.name).add(ty);
+          for (const ty of this.typesOfSubmodule(s, t)) submodules.get(s.name).add(ty);
         }
       }
     }
     return this.cache;
   }
 
-  // Possible types of a submodule declaration: its type, or the default and
-  // every implementation of its interface (chosen with `typename` in the ini).
-  typesOfSubmodule(s) {
+  // Name of the type that `name` refers to from the type `from`. When several
+  // types share the simple name, NED picks the one in the same file or package:
+  // its qualified name is returned then. Otherwise the simple name.
+  resolveName(name, from) {
+    const list = this.build().types.get(name);
+    if (!list || list.length < 2 || !from) return name;
+    const pkg = (t) => t.qualified.slice(0, -t.name.length);
+    const best = list.find((t) => t.file === from.file) || list.find((t) => pkg(t) === pkg(from));
+    return best ? best.qualified : name;
+  }
+
+  // Possible types of a submodule declaration of the type `owner`: its type, or
+  // the default and every implementation of its interface (chosen with
+  // `typename` in the ini).
+  typesOfSubmodule(s, owner) {
     const set = new Set();
-    if (s.type) set.add(s.type);
-    if (s.defaultType) set.add(s.defaultType);
+    if (s.type) set.add(this.resolveName(s.type, owner));
+    if (s.defaultType) set.add(this.resolveName(s.defaultType, owner));
     if (s.iface) for (const impl of this.build().impls.get(s.iface) || []) set.add(impl);
     return [...set];
+  }
+
+  // Result of fn(), cached until the next change to the NED files. Callers
+  // must not modify it.
+  memo(kind, key, fn) {
+    const b = this.build();
+    if (!b.memo) b.memo = new Map();
+    const k = `${kind} ${key}`;
+    if (!b.memo.has(k)) b.memo.set(k, fn());
+    return b.memo.get(k);
   }
 
   // Parameters of a type, including inherited ones; assignments in derived
   // types override the value. Each parameter: the declaration plus
   // {declaredIn, file, assignedIn, fixed}.
-  paramsOf(typeName, seen = new Set()) {
+  paramsOf(typeName, seen) {
+    if (!seen) return this.memo('params', typeName, () => this.paramsOf(typeName, new Set()));
     if (seen.has(typeName)) return [];
     seen.add(typeName);
     const t = this.type(typeName);
     if (!t) return [];
     const byName = new Map();
-    if (t.extends) for (const p of this.paramsOf(t.extends, seen)) byName.set(p.name, p);
+    if (t.extends) for (const p of this.paramsOf(this.resolveName(t.extends, t), seen)) byName.set(p.name, p);
     for (const d of t.params) byName.set(d.name, { ...d, declaredIn: t.name, file: t.file, assignedIn: null });
     for (const a of t.assigns) {
       const p = byName.get(a.name);
@@ -364,18 +421,23 @@ class NedIndex {
 
   // Submodules of a type, including the ones inherited through `extends`:
   // [{name, vector, types}].
-  children(typeName, seen = new Set()) {
+  children(typeName, seen) {
+    if (!seen) return this.memo('children', typeName, () => this.children(typeName, new Set()));
     if (seen.has(typeName)) return [];
     seen.add(typeName);
     const t = this.type(typeName);
     if (!t) return [];
-    const own = t.submodules.map((s) => ({ name: s.name, vector: s.vector, types: this.typesOfSubmodule(s), assigns: s.assigns, parent: t.name }));
-    const inherited = t.extends ? this.children(t.extends, seen).filter((c) => !own.some((o) => o.name === c.name)) : [];
+    const own = t.submodules.map((s) => ({ name: s.name, vector: s.vector, types: this.typesOfSubmodule(s, t), assigns: s.assigns, parent: t.name }));
+    const inherited = t.extends ? this.children(this.resolveName(t.extends, t), seen).filter((c) => !own.some((o) => o.name === c.name)) : [];
     return [...own, ...inherited];
   }
 
   // The given types plus every type reachable from them through submodules.
   closure(typeNames) {
+    return this.memo('closure', [...typeNames].sort().join(' '), () => this.closureOf(typeNames));
+  }
+
+  closureOf(typeNames) {
     const seen = new Set();
     const todo = [...typeNames];
     while (todo.length) {
@@ -394,7 +456,9 @@ class NedIndex {
     return out;
   }
 
+  // Type by qualified name, or the first one with this simple name.
   type(name) {
+    if (name.includes('.')) return this.build().qualified.get(name);
     const list = this.build().types.get(name);
     return list ? list[0] : undefined;
   }
@@ -405,19 +469,34 @@ class NedIndex {
     return out;
   }
 
-  // Networks by simple or qualified name.
-  findNetwork(name) {
-    return this.networks().filter((t) => t.name === name || t.qualified === name);
+  // Networks by simple or qualified name. When several networks share a simple
+  // name (as in INET's examples), the ones in the folder `dir` of the ini file
+  // win, as OMNeT++ looks the name up in the package of that folder first.
+  findNetwork(name, dir) {
+    const list = this.networks().filter((t) => t.name === name || t.qualified === name);
+    const near = dir && list.length > 1 ? list.filter((t) => path.dirname(t.file) === dir) : [];
+    return near.length ? near : list;
+  }
+
+  // Whether any type in the workspace declares a parameter with this name.
+  declaresParam(name) {
+    const b = this.build();
+    if (!b.paramNames) {
+      b.paramNames = new Set();
+      for (const list of b.types.values()) for (const t of list) for (const p of t.params) b.paramNames.add(p.name);
+    }
+    return b.paramNames.has(name);
   }
 
   // Statistics of a type, including the ones inherited through `extends`.
-  statsOf(typeName, seen = new Set()) {
+  statsOf(typeName, seen) {
+    if (!seen) return this.memo('stats', typeName, () => this.statsOf(typeName, new Set()));
     if (seen.has(typeName)) return [];
     seen.add(typeName);
     const t = this.type(typeName);
     if (!t) return [];
     const own = t.stats;
-    const inherited = t.extends ? this.statsOf(t.extends, seen).filter((s) => !own.some((o) => o.name === s.name)) : [];
+    const inherited = t.extends ? this.statsOf(this.resolveName(t.extends, t), seen).filter((s) => !own.some((o) => o.name === s.name)) : [];
     return [...own, ...inherited];
   }
 
