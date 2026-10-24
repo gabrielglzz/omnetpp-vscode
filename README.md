@@ -1,5 +1,7 @@
 # OMNeT++ for VS Code
 
+[![CI](https://github.com/gabrielglzz/omnetpp-vscode/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielglzz/omnetpp-vscode/actions/workflows/ci.yml)
+
 Support for [OMNeT++](https://omnetpp.org) `.ini` files in Visual Studio Code: highlighting, completion driven by your NED files, the same errors OMNeT++ would report when loading the file, and buttons to run and debug each configuration. Plain JavaScript, no dependencies.
 
 ## Features
